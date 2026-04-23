@@ -1,0 +1,18 @@
+[Unit]
+Description=Zyxel NR5103 5G CPE Network Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=monitor
+WorkingDirectory=/opt/zyxel-nr5103-monitor
+ExecStart=/opt/zyxel-nr5103-monitor/zyxel-nr5103-monitor
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zyxel-nr5103-monitor
+
+[Install]
+WantedBy=multi-user.target
