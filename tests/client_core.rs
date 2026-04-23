@@ -122,7 +122,7 @@ async fn execute_updates_session_key_from_json_response() {
 }
 
 #[tokio::test]
-async fn execute_uses_json_content_type_and_handles_encrypted_http_flow() {
+async fn execute_uses_form_content_type_and_handles_encrypted_http_flow() {
     let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
@@ -148,11 +148,9 @@ async fn execute_uses_json_content_type_and_handles_encrypted_http_flow() {
         let read = api_stream.read(&mut api_buffer).unwrap();
         let request = String::from_utf8(api_buffer[..read].to_vec()).unwrap();
 
-        assert!(
-            request
-                .to_ascii_lowercase()
-                .contains("content-type: application/json")
-        );
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("content-type: application/x-www-form-urlencoded"));
 
         let body = request.split("\r\n\r\n").nth(1).unwrap();
         let payload: Value = serde_json::from_str(body).unwrap();

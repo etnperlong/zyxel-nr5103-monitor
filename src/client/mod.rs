@@ -3,7 +3,10 @@ pub mod crypto;
 pub mod device;
 
 use anyhow::{Context, Result, bail};
-use reqwest::{Client, ClientBuilder};
+use reqwest::{
+    Client, ClientBuilder,
+    header::{self, HeaderValue},
+};
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::{
     Arc,
@@ -110,6 +113,11 @@ impl ZyxelClient {
         };
 
         let request_builder = if let Some(body) = body {
+            let request_builder = request_builder.header(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/x-www-form-urlencoded"),
+            );
+
             if !self.use_https && ep.encrypt_request {
                 let crypto = self
                     .crypto
