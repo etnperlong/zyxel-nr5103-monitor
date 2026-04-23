@@ -3,4 +3,35 @@ name = "zyxel-nr5103-monitor"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "zyxel-nr5103-monitor"
+path = "src/main.rs"
+
 [dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client (rustls, no system openssl dep, supports cookie jar + TLS skip)
+reqwest = { version = "0.12", features = ["json", "cookies", "rustls-tls"], default-features = false }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Config (TOML)
+config = { version = "0.14", features = ["toml"] }
+
+# Crypto
+rsa = { version = "0.9", features = ["pkcs5", "pem"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+rand = "0.8"
+base64 = "0.22"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
