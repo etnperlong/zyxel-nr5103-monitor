@@ -103,7 +103,8 @@ async fn monitor_run_checks_connectivity_and_logs_out_on_sigint() {
     );
     let connectivity_response = http_empty_response("204 No Content");
     let logout_response = http_response("200 OK", "text/plain", "OK");
-    let (host, requests) = spawn_http_server(vec![rsa_response, connectivity_response, logout_response]);
+    let (host, requests) =
+        spawn_http_server(vec![rsa_response, connectivity_response, logout_response]);
 
     let client = Arc::new(
         ZyxelClient::new(&RouterConfig {

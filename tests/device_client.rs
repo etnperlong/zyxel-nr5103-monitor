@@ -2,10 +2,7 @@ use rsa::{RsaPrivateKey, pkcs8::EncodePublicKey};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
-use zyxel_nr5103_monitor::{
-    client::ZyxelClient,
-    config::RouterConfig,
-};
+use zyxel_nr5103_monitor::{client::ZyxelClient, config::RouterConfig};
 
 fn spawn_http_server(responses: Vec<String>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -27,7 +24,8 @@ fn spawn_http_server(responses: Vec<String>) -> String {
 fn http_json_response(body: String) -> String {
     format!(
         "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-        body.len(), body
+        body.len(),
+        body
     )
 }
 

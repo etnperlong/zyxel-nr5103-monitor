@@ -20,7 +20,6 @@ struct LoginRequest<'a> {
 
 #[derive(Deserialize)]
 pub struct LoginResponse {
-    pub sessionkey: Option<serde_json::Number>,
     pub result: Option<String>,
 }
 

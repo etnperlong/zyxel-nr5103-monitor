@@ -35,7 +35,9 @@ impl ZyxelClient {
     }
 
     pub async fn reboot(&self) -> Result<()> {
-        let _ = self.execute::<(), serde_json::Value>(&REBOOT_EP, None).await?;
+        let _ = self
+            .execute::<(), serde_json::Value>(&REBOOT_EP, None)
+            .await?;
         Ok(())
     }
 }

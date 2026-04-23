@@ -3,9 +3,7 @@ pub mod crypto;
 pub mod device;
 
 use anyhow::{Context, Result, bail};
-use reqwest::{
-    Client, ClientBuilder,
-};
+use reqwest::{Client, ClientBuilder};
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::{
     Arc,
@@ -113,7 +111,10 @@ impl ZyxelClient {
 
         let request_builder = if let Some(body) = body {
             if !self.use_https && ep.encrypt_request {
-                let crypto = self.crypto.as_ref().context("No crypto state in HTTP mode")?;
+                let crypto = self
+                    .crypto
+                    .as_ref()
+                    .context("No crypto state in HTTP mode")?;
                 let encrypted = crypto.encrypt_json(body, ep.include_aes_key)?;
                 request_builder.json(&encrypted)
             } else {
@@ -123,7 +124,10 @@ impl ZyxelClient {
             request_builder
         };
 
-        let http_response = request_builder.send().await.context("HTTP request failed")?;
+        let http_response = request_builder
+            .send()
+            .await
+            .context("HTTP request failed")?;
 
         if !http_response.status().is_success() {
             bail!("HTTP {} for {}", http_response.status(), ep.path);
@@ -136,7 +140,10 @@ impl ZyxelClient {
 
         let json_bytes = if !self.use_https && ep.encrypt_request && body.is_some() {
             let encrypted_response: EncryptedResponse = serde_json::from_slice(&raw_bytes)?;
-            let crypto = self.crypto.as_ref().context("No crypto state in HTTP mode")?;
+            let crypto = self
+                .crypto
+                .as_ref()
+                .context("No crypto state in HTTP mode")?;
             crypto.decrypt_response(&encrypted_response)?
         } else {
             raw_bytes.to_vec()
@@ -144,7 +151,8 @@ impl ZyxelClient {
 
         self.try_extract_session_key(&json_bytes);
 
-        let parsed = serde_json::from_slice(&json_bytes).context("Failed to deserialize response")?;
+        let parsed =
+            serde_json::from_slice(&json_bytes).context("Failed to deserialize response")?;
         Ok(Some(parsed))
     }
 

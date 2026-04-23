@@ -68,7 +68,11 @@ mod duration_secs {
 
 pub fn load_config() -> Result<AppConfig> {
     let cfg = ConfigBuilder::builder()
-        .add_source(File::with_name("config").format(FileFormat::Toml).required(false))
+        .add_source(
+            File::with_name("config")
+                .format(FileFormat::Toml)
+                .required(false),
+        )
         .add_source(
             File::with_name(&format!(
                 "{}/.config/nr5103/config",

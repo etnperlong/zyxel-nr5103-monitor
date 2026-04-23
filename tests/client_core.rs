@@ -1,7 +1,7 @@
 use aes::Aes256;
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
-use cbc::{Decryptor, Encryptor};
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+use cbc::{Decryptor, Encryptor};
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, pkcs8::EncodePublicKey};
 use serde_json::Value;
 use std::io::{Read, Write};
@@ -35,7 +35,8 @@ fn spawn_http_server(responses: Vec<String>) -> String {
 fn http_json_response(body: String) -> String {
     format!(
         "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-        body.len(), body
+        body.len(),
+        body
     )
 }
 
@@ -147,12 +148,18 @@ async fn execute_uses_json_content_type_and_handles_encrypted_http_flow() {
         let read = api_stream.read(&mut api_buffer).unwrap();
         let request = String::from_utf8(api_buffer[..read].to_vec()).unwrap();
 
-        assert!(request.to_ascii_lowercase().contains("content-type: application/json"));
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("content-type: application/json")
+        );
 
         let body = request.split("\r\n\r\n").nth(1).unwrap();
         let payload: Value = serde_json::from_str(body).unwrap();
         let encrypted_key = B64.decode(payload["key"].as_str().unwrap()).unwrap();
-        let encoded_aes_key = private_key.decrypt(Pkcs1v15Encrypt, &encrypted_key).unwrap();
+        let encoded_aes_key = private_key
+            .decrypt(Pkcs1v15Encrypt, &encrypted_key)
+            .unwrap();
         let aes_key_vec = B64.decode(encoded_aes_key).unwrap();
         let aes_key: [u8; 32] = aes_key_vec.try_into().unwrap();
 
@@ -163,7 +170,8 @@ async fn execute_uses_json_content_type_and_handles_encrypted_http_flow() {
         );
         assert_eq!(decrypted_request, serde_json::json!({"hello": "world"}));
 
-        let encrypted_response = encrypt_response_payload(&aes_key, r#"{"sessionkey":99,"ok":true}"#);
+        let encrypted_response =
+            encrypt_response_payload(&aes_key, r#"{"sessionkey":99,"ok":true}"#);
         let response = http_json_response(encrypted_response);
         api_stream.write_all(response.as_bytes()).unwrap();
         api_stream.flush().unwrap();

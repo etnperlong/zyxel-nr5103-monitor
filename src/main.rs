@@ -21,7 +21,10 @@ async fn main() -> Result<()> {
     let router_client = Arc::new(client::ZyxelClient::new(&cfg.router).await?);
 
     router_client.login().await?;
-    info!(session_key = router_client.session_key(), "Login successful");
+    info!(
+        session_key = router_client.session_key(),
+        "Login successful"
+    );
 
     let device_info = router_client.get_basic_information().await?;
     info!(
