@@ -5,7 +5,6 @@ pub mod device;
 use anyhow::{Context, Result, bail};
 use reqwest::{
     Client, ClientBuilder,
-    header::{self},
 };
 use serde::{Serialize, de::DeserializeOwned};
 use std::sync::{
@@ -97,8 +96,6 @@ impl ZyxelClient {
         Req: Serialize,
         Resp: DeserializeOwned,
     {
-        let _credentials = (&self.username, &self.password);
-
         let mut url = format!("{}{}", self.base_url, ep.path);
         if ep.requires_auth {
             let session_key = self.session_key.load(Ordering::SeqCst);
@@ -118,13 +115,9 @@ impl ZyxelClient {
             if !self.use_https && ep.encrypt_request {
                 let crypto = self.crypto.as_ref().context("No crypto state in HTTP mode")?;
                 let encrypted = crypto.encrypt_json(body, ep.include_aes_key)?;
-                request_builder
-                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                    .json(&encrypted)
+                request_builder.json(&encrypted)
             } else {
-                request_builder
-                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-                    .json(body)
+                request_builder.json(body)
             }
         } else {
             request_builder
