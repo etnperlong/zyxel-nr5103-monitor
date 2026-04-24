@@ -30,7 +30,18 @@ async fn main() -> Result<()> {
         );
 
         info!("Starting monitor loop");
+        let monitor_telemetry = cfg.telemetry.metrics.enabled.then(|| {
+            telemetry::metrics::TelemetryCollector::new(
+                Arc::clone(&router_client),
+                telemetry.meter("zyxel-nr5103-monitor"),
+            )
+        });
         let monitor = monitor::Monitor::new(Arc::clone(&router_client), cfg.monitor)?;
+        let monitor = if let Some(monitor_telemetry) = monitor_telemetry {
+            monitor.with_telemetry(monitor_telemetry)
+        } else {
+            monitor
+        };
         monitor.run().await
     }
     .await;

@@ -9,6 +9,14 @@ pub struct DalResponse<T> {
 }
 
 impl<T> DalResponse<T> {
+    pub fn first_object(&self) -> Option<&T> {
+        if !is_success_result(&self.result) {
+            return None;
+        }
+
+        self.object.first()
+    }
+
     pub fn into_first_object(self) -> Option<T> {
         if !is_success_result(&self.result) {
             return None;
@@ -187,6 +195,20 @@ pub struct CellWanStatusObject {
     pub nsa_sinr: Option<f64>,
     #[serde(rename = "SCC_Info", default)]
     pub scc_info: Vec<SccInfo>,
+}
+
+impl CellWanStatusObject {
+    pub(crate) fn needs_band_metadata_lookup(&self) -> bool {
+        self.intf_current_access_technology
+            .as_deref()
+            .and_then(sanitize_access_technology)
+            .is_none()
+            || self
+                .intf_current_band
+                .as_deref()
+                .and_then(sanitize_band)
+                .is_none()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -843,8 +865,8 @@ fn parse_band_list(value: &str) -> Vec<String> {
 fn sanitize_status(value: &str) -> Option<String> {
     let status = canonicalize_label(value)?;
     match status.as_str() {
-        "up" | "down" | "connected" | "disconnected" | "active" | "inactive"
-        | "enabled" | "disabled" | "unknown" => Some(status),
+        "up" | "down" | "connected" | "disconnected" | "active" | "inactive" | "enabled"
+        | "disabled" | "unknown" => Some(status),
         _ => None,
     }
 }

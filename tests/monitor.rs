@@ -191,6 +191,67 @@ async fn monitor_run_checks_connectivity_and_logs_out_on_sigint() {
 }
 
 #[tokio::test]
+async fn metrics_disabled_does_not_poll_dal() {
+    let rsa_response = http_response(
+        "200 OK",
+        "application/json",
+        &format!(
+            r#"{{"RSAPublicKey":{}}}"#,
+            serde_json::to_string(&test_public_key_pem()).unwrap()
+        ),
+    );
+    let connectivity_response = http_empty_response("204 No Content");
+    let logout_response = http_response("200 OK", "text/plain", "OK");
+    let (host, requests) =
+        spawn_http_server(vec![rsa_response, connectivity_response, logout_response]);
+
+    let client = Arc::new(
+        ZyxelClient::new(&RouterConfig {
+            host: host.trim_start_matches("http://").to_string(),
+            protocol: "http".to_string(),
+            username: "admin".to_string(),
+            password: "secret".to_string(),
+        })
+        .await
+        .unwrap(),
+    );
+
+    let monitor = Monitor::new(
+        client,
+        MonitorConfig {
+            interval: Duration::from_secs(60),
+            url: format!("{host}/generate_204"),
+            timeout: Duration::from_secs(2),
+            max_retries: 3,
+            min_reboot_interval: Duration::from_secs(300),
+        },
+    )
+    .unwrap();
+
+    let monitor_task = tokio::spawn(async move { monitor.run().await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let status = Command::new("kill")
+        .args(["-INT", &std::process::id().to_string()])
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let run_result: anyhow::Result<()> = tokio::time::timeout(Duration::from_secs(5), monitor_task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(run_result.is_ok());
+
+    let recorded_requests = requests.lock().unwrap().clone();
+    assert!(
+        recorded_requests
+            .iter()
+            .all(|request| !request.contains("/cgi-bin/DAL?oid="))
+    );
+}
+
+#[tokio::test]
 async fn monitor_reauthenticates_and_reboots_after_connectivity_failure() {
     let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
     let public_key_pem = private_key
