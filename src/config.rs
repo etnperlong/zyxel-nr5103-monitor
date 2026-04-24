@@ -14,6 +14,8 @@ pub struct AppConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct RouterConfig {
     pub host: String,
+    #[serde(default = "default_router_protocol")]
+    pub protocol: String,
     pub username: String,
     pub password: String,
 }
@@ -34,6 +36,10 @@ pub struct MonitorConfig {
 
 fn default_log_level() -> String {
     "info".to_string()
+}
+
+fn default_router_protocol() -> String {
+    "http".to_string()
 }
 
 fn default_interval_secs() -> Duration {

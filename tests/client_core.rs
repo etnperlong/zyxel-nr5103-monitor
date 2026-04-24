@@ -76,6 +76,7 @@ fn test_public_key_pem() -> String {
 async fn new_uses_https_mode_without_fetching_rsa_key() {
     let client = ZyxelClient::new(&RouterConfig {
         host: "router.local".to_string(),
+        protocol: "https".to_string(),
         username: "admin".to_string(),
         password: "secret".to_string(),
     })
@@ -95,7 +96,8 @@ async fn execute_updates_session_key_from_json_response() {
     let host = spawn_http_server(vec![rsa_response, api_response]);
 
     let client = ZyxelClient::new(&RouterConfig {
-        host,
+        host: host.trim_start_matches("http://").to_string(),
+        protocol: "http".to_string(),
         username: "admin".to_string(),
         password: "secret".to_string(),
     })
@@ -178,7 +180,8 @@ async fn execute_uses_form_content_type_and_handles_encrypted_http_flow() {
     });
 
     let client = ZyxelClient::new(&RouterConfig {
-        host: format!("http://{addr}"),
+        host: addr.to_string(),
+        protocol: "http".to_string(),
         username: "admin".to_string(),
         password: "secret".to_string(),
     })

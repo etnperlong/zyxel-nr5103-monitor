@@ -2,6 +2,7 @@ log_level = "info"
 
 [router]
 host = "172.16.0.1"
+protocol = "http"
 username = "monitor"
 password = "Monitor5103"
 

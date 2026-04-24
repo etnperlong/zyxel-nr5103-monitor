@@ -53,7 +53,8 @@ async fn get_basic_information_returns_device_details() {
     let host = spawn_http_server(vec![rsa_response, info_response]);
 
     let client = ZyxelClient::new(&RouterConfig {
-        host,
+        host: host.trim_start_matches("http://").to_string(),
+        protocol: "http".to_string(),
         username: "admin".to_string(),
         password: "secret".to_string(),
     })
@@ -76,7 +77,8 @@ async fn reboot_accepts_empty_success_response() {
     let host = spawn_http_server(vec![rsa_response, reboot_response]);
 
     let client = ZyxelClient::new(&RouterConfig {
-        host,
+        host: host.trim_start_matches("http://").to_string(),
+        protocol: "http".to_string(),
         username: "admin".to_string(),
         password: "secret".to_string(),
     })

@@ -43,6 +43,7 @@ log_level = "info"
 
 [router]
 host = "172.16.0.1"
+protocol = "http"
 username = "monitor"
 password = "Monitor5103"
 
@@ -57,7 +58,8 @@ min_reboot_interval = 3600
 ### 配置字段说明
 
 - `log_level`：日志级别，例如 `info`、`debug`
-- `router.host`：路由器地址；如果写成 `http://...` 就强制使用 HTTP 模式，否则使用 HTTPS
+- `router.host`：路由器地址，不包含协议前缀
+- `router.protocol`：可选协议，支持 `http` 或 `https`，默认值为 `http`
 - `router.username`：路由器用户名
 - `router.password`：路由器密码
 - `monitor.interval`：连通性检查间隔，单位秒

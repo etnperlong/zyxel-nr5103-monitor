@@ -64,11 +64,39 @@ password = "secret"
     let loaded = config::load_config().expect("config should load from local file");
 
     assert_eq!(loaded.log_level, "debug");
+    assert_eq!(loaded.router.protocol, "http");
     assert_eq!(loaded.monitor.interval, Duration::from_secs(60));
     assert_eq!(loaded.monitor.url, "http://www.gstatic.com/generate_204");
     assert_eq!(loaded.monitor.timeout, Duration::from_secs(5));
     assert_eq!(loaded.monitor.max_retries, 1);
     assert_eq!(loaded.monitor.min_reboot_interval, Duration::from_secs(300));
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_config_allows_explicit_router_protocol() {
+    let _env_guard = env_lock().lock().expect("env lock should not be poisoned");
+    let temp_dir = unique_temp_dir();
+    let _dir_guard = CurrentDirGuard::change_to(&temp_dir);
+
+    fs::write(
+        temp_dir.join("config.toml"),
+        r#"
+[router]
+host = "172.16.0.1"
+protocol = "https"
+username = "monitor"
+password = "secret"
+
+[monitor]
+"#,
+    )
+    .expect("config file should be written");
+
+    let loaded = config::load_config().expect("config should load from local file");
+
+    assert_eq!(loaded.router.protocol, "https");
 
     fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }

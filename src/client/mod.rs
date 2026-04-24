@@ -37,11 +37,19 @@ pub struct ApiEndpoint {
 
 impl ZyxelClient {
     pub async fn new(cfg: &RouterConfig) -> Result<Self> {
-        let use_https = !cfg.host.to_lowercase().starts_with("http://");
+        let use_https = match cfg.protocol.to_ascii_lowercase().as_str() {
+            "http" => false,
+            "https" => true,
+            other => bail!("Unsupported router protocol: {other}"),
+        };
+        let host = cfg
+            .host
+            .trim_start_matches("http://")
+            .trim_start_matches("https://");
         let base_url = if use_https {
-            format!("https://{}", cfg.host.trim_start_matches("https://"))
+            format!("https://{host}")
         } else {
-            format!("http://{}", cfg.host.trim_start_matches("http://"))
+            format!("http://{host}")
         };
 
         let http = ClientBuilder::new()

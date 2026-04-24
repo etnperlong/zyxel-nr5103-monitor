@@ -43,6 +43,7 @@ log_level = "info"
 
 [router]
 host = "172.16.0.1"
+protocol = "http"
 username = "monitor"
 password = "Monitor5103"
 
@@ -57,7 +58,8 @@ min_reboot_interval = 3600
 ### Config fields
 
 - `log_level`: tracing filter, e.g. `info`, `debug`
-- `router.host`: router hostname or address; `http://...` forces HTTP mode, otherwise HTTPS is used
+- `router.host`: router hostname or address without protocol prefix
+- `router.protocol`: optional router protocol, `http` or `https`; defaults to `http`
 - `router.username`: router login username
 - `router.password`: router login password
 - `monitor.interval`: connectivity check interval in seconds

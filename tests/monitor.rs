@@ -101,7 +101,8 @@ async fn monitor_new_builds_with_router_client_and_config() {
 
     let client = Arc::new(
         ZyxelClient::new(&RouterConfig {
-            host,
+            host: host.trim_start_matches("http://").to_string(),
+            protocol: "http".to_string(),
             username: "admin".to_string(),
             password: "secret".to_string(),
         })
@@ -140,7 +141,8 @@ async fn monitor_run_checks_connectivity_and_logs_out_on_sigint() {
 
     let client = Arc::new(
         ZyxelClient::new(&RouterConfig {
-            host: host.clone(),
+            host: host.trim_start_matches("http://").to_string(),
+            protocol: "http".to_string(),
             username: "admin".to_string(),
             password: "secret".to_string(),
         })
@@ -309,7 +311,8 @@ async fn monitor_reauthenticates_and_reboots_after_connectivity_failure() {
     let host = format!("http://{addr}");
     let client = Arc::new(
         ZyxelClient::new(&RouterConfig {
-            host: host.clone(),
+            host: addr.to_string(),
+            protocol: "http".to_string(),
             username: "admin".to_string(),
             password: "secret".to_string(),
         })
