@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod crypto;
+pub mod dal;
 pub mod device;
 
 use anyhow::{Context, Result, bail};
@@ -15,6 +16,17 @@ use std::sync::{
 
 use crate::config::RouterConfig;
 use crypto::{CryptoState, EncryptedResponse};
+
+fn append_session_key(url: &mut String, session_key: i64) {
+    if session_key == 0 {
+        return;
+    }
+
+    let separator = if url.contains('?') { '&' } else { '?' };
+    url.push(separator);
+    url.push_str("sessionkey=");
+    url.push_str(&session_key.to_string());
+}
 
 pub struct ZyxelClient {
     base_url: String,
@@ -105,12 +117,23 @@ impl ZyxelClient {
         Req: Serialize,
         Resp: DeserializeOwned,
     {
-        let mut url = format!("{}{}", self.base_url, ep.path);
+        self.execute_path(ep, ep.path, body).await
+    }
+
+    pub(crate) async fn execute_path<Req, Resp>(
+        &self,
+        ep: &ApiEndpoint,
+        path: &str,
+        body: Option<&Req>,
+    ) -> Result<Option<Resp>>
+    where
+        Req: Serialize,
+        Resp: DeserializeOwned,
+    {
+        let mut url = format!("{}{}", self.base_url, path);
         if ep.requires_auth {
             let session_key = self.session_key.load(Ordering::SeqCst);
-            if session_key != 0 {
-                url.push_str(&format!("?sessionkey={session_key}"));
-            }
+            append_session_key(&mut url, session_key);
         }
 
         let request_builder = match ep.method {
@@ -146,7 +169,7 @@ impl ZyxelClient {
             .context("HTTP request failed")?;
 
         if !http_response.status().is_success() {
-            bail!("HTTP {} for {}", http_response.status(), ep.path);
+            bail!("HTTP {} for {}", http_response.status(), path);
         }
 
         let raw_bytes = http_response.bytes().await?;
