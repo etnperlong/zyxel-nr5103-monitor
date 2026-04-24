@@ -37,6 +37,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-opentelemetry = "0.32.1"
 opentelemetry = "0.31.0"
-opentelemetry_sdk = { version = "0.31.0", default-features = false, features = ["rt-tokio", "trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.31.0", default-features = false, features = ["rt-tokio", "trace", "metrics", "logs", "testing"] }
 opentelemetry-otlp = { version = "0.31.1", default-features = false, features = ["grpc-tonic", "tls-roots", "trace", "metrics", "logs"] }
 opentelemetry-appender-tracing = "0.31.1"
