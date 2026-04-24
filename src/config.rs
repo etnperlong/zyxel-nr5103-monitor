@@ -9,7 +9,6 @@ pub struct AppConfig {
     pub log_level: String,
     pub router: RouterConfig,
     pub monitor: MonitorConfig,
-    #[allow(dead_code)]
     #[serde(default)]
     pub telemetry: TelemetryConfig,
 }
@@ -37,7 +36,6 @@ pub struct MonitorConfig {
     pub min_reboot_interval: Duration,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 pub struct TelemetryConfig {
     #[serde(default = "default_service_name")]
@@ -67,7 +65,6 @@ impl Default for TelemetryConfig {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct TelemetrySignalConfig {
     #[serde(default)]
