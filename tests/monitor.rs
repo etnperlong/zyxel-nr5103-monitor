@@ -1,7 +1,7 @@
 use aes::Aes256;
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
-use cbc::{Decryptor, Encryptor};
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, block_padding::Pkcs7};
+use cbc::{Decryptor, Encryptor};
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, pkcs8::EncodePublicKey};
 use serde_json::Value;
 use std::io::{Read, Write};
@@ -256,13 +256,17 @@ async fn monitor_reauthenticates_and_reboots_after_connectivity_failure() {
         let login_request = String::from_utf8_lossy(&login_buffer[..login_read]).to_string();
         request_log.lock().unwrap().push(login_request.clone());
 
-        assert!(login_request
-            .to_ascii_lowercase()
-            .contains("content-type: application/x-www-form-urlencoded"));
+        assert!(
+            login_request
+                .to_ascii_lowercase()
+                .contains("content-type: application/x-www-form-urlencoded")
+        );
         let login_body = login_request.split("\r\n\r\n").nth(1).unwrap();
         let payload: Value = serde_json::from_str(login_body).unwrap();
         let encrypted_key = B64.decode(payload["key"].as_str().unwrap()).unwrap();
-        let encoded_aes_key = private_key.decrypt(Pkcs1v15Encrypt, &encrypted_key).unwrap();
+        let encoded_aes_key = private_key
+            .decrypt(Pkcs1v15Encrypt, &encrypted_key)
+            .unwrap();
         let aes_key_vec = B64.decode(encoded_aes_key).unwrap();
         let aes_key: [u8; 32] = aes_key_vec.try_into().unwrap();
         let decrypted_request = decrypt_request_payload(
@@ -343,19 +347,29 @@ async fn monitor_reauthenticates_and_reboots_after_connectivity_failure() {
     server.join().unwrap();
 
     let recorded_requests = requests.lock().unwrap().clone();
-    assert!(recorded_requests
-        .iter()
-        .any(|request| request.starts_with("GET /generate_204 ")));
-    assert!(recorded_requests
-        .iter()
-        .any(|request| request.starts_with("GET /getBasicInformation ")));
-    assert!(recorded_requests
-        .iter()
-        .any(|request| request.starts_with("POST /cgi-bin/UserLogout")));
-    assert!(recorded_requests
-        .iter()
-        .any(|request| request.starts_with("POST /UserLogin ")));
-    assert!(recorded_requests
-        .iter()
-        .any(|request| request.contains("POST /cgi-bin/Reboot?sessionkey=77 ")));
+    assert!(
+        recorded_requests
+            .iter()
+            .any(|request| request.starts_with("GET /generate_204 "))
+    );
+    assert!(
+        recorded_requests
+            .iter()
+            .any(|request| request.starts_with("GET /getBasicInformation "))
+    );
+    assert!(
+        recorded_requests
+            .iter()
+            .any(|request| request.starts_with("POST /cgi-bin/UserLogout"))
+    );
+    assert!(
+        recorded_requests
+            .iter()
+            .any(|request| request.starts_with("POST /UserLogin "))
+    );
+    assert!(
+        recorded_requests
+            .iter()
+            .any(|request| request.contains("POST /cgi-bin/Reboot?sessionkey=77 "))
+    );
 }

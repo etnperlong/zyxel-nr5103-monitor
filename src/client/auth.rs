@@ -189,9 +189,11 @@ mod tests {
 
         let error = client.login().await.unwrap_err();
 
-        assert!(error
-            .to_string()
-            .contains("Login succeeded without session key"));
+        assert!(
+            error
+                .to_string()
+                .contains("Login succeeded without session key")
+        );
     }
 
     #[tokio::test]
