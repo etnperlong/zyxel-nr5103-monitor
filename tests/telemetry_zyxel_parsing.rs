@@ -260,3 +260,93 @@ fn router_telemetry_snapshot_from_dal_responses_allows_missing_optional_endpoint
     assert_eq!(snapshot.traffic.len(), 2);
     assert_eq!(snapshot.lan_ports.len(), 2);
 }
+
+#[test]
+fn router_telemetry_snapshot_drops_sensitive_text_like_values() {
+    let status = parse_response::<StatusObject>(
+        r#"{
+            "result":"ZCFG_SUCCESS",
+            "Object":[{
+              "LanPortInfo":[
+                {"Name":"LAN1","Status":"Up"},
+                {"Name":"LAN1-IMEI8675309","Status":"Down"}
+              ]
+            }]
+        }"#,
+    );
+
+    let cellwan_status = parse_response::<CellWanStatusObject>(
+        r#"{
+            "result":"ZCFG_SUCCESS",
+            "Object":[{
+              "INTF_Current_Access_Technology":"IMSI46000123",
+              "INTF_Current_Band":"Cell_ID_1234"
+            }]
+        }"#,
+    );
+
+    let traffic = parse_response::<TrafficStatusObject>(
+        r#"{
+            "result":"ZCFG_SUCCESS",
+            "Object":[{
+              "ipIface":[{"X_ZYXEL_IfName":"wwan0-ICCID_987654","Status":"Up"}],
+              "ipIfaceSt":[{"BytesSent":"1","BytesReceived":"2"}],
+              "ethIface":[{"Name":"LAN2","Status":"Up"}],
+              "ethIfaceSt":[{"BytesSent":"3","BytesReceived":"4"}]
+            }]
+        }"#,
+    );
+
+    let band = parse_response::<CellWanBandObject>(
+        r#"{
+            "result":"ZCFG_SUCCESS",
+            "Object":[{
+              "INTF_Supported_Access_Technologies":"LTE,IMSI46000123,NR5G-NSA",
+              "INTF_Supported_Bands":"B3,IMEI8675309,n78"
+            }]
+        }"#,
+    );
+
+    let snapshot = RouterTelemetrySnapshot::from_dal_responses(
+        Some(status),
+        Some(cellwan_status),
+        Some(traffic),
+        Some(band),
+    );
+
+    assert_eq!(snapshot.lan_ports.len(), 1);
+    assert_eq!(snapshot.lan_ports[0].port_name, "lan1");
+
+    assert_eq!(snapshot.traffic.len(), 1);
+    assert_eq!(snapshot.traffic[0].interface_name, "lan2");
+
+    let cellular = snapshot.cellular.expect("cellular metrics should exist");
+    assert_eq!(cellular.access_technology, None);
+    assert_eq!(cellular.current_band, None);
+    assert_eq!(cellular.supported_access_technologies, vec!["lte", "nr5g_nsa"]);
+    assert_eq!(cellular.supported_bands, vec!["b3", "n78"]);
+}
+
+#[test]
+fn router_telemetry_snapshot_ignores_non_success_dal_responses() {
+    let failed_status = parse_response::<StatusObject>(
+        r#"{
+            "result":"ZCFG_FAILURE",
+            "Object":[{
+              "DeviceInfo":{"ModelName":"NR5103","UpTime":"42"},
+              "LanPortInfo":[{"Name":"LAN1","Status":"Up"}]
+            }]
+        }"#,
+    );
+
+    let snapshot = RouterTelemetrySnapshot::from_dal_responses(
+        Some(failed_status),
+        None,
+        Some(parse_response::<TrafficStatusObject>(TRAFFIC_STATUS_JSON)),
+        None,
+    );
+
+    assert!(snapshot.system.is_none());
+    assert!(snapshot.lan_ports.is_empty());
+    assert_eq!(snapshot.traffic.len(), 2);
+}

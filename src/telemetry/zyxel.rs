@@ -10,8 +10,17 @@ pub struct DalResponse<T> {
 
 impl<T> DalResponse<T> {
     pub fn into_first_object(self) -> Option<T> {
+        if !is_success_result(&self.result) {
+            return None;
+        }
+
         self.object.into_iter().next()
     }
+}
+
+fn is_success_result(result: &str) -> bool {
+    let trimmed = result.trim();
+    trimmed.eq_ignore_ascii_case("ZCFG_SUCCESS") || trimmed.eq_ignore_ascii_case("SUCCESS")
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
@@ -531,39 +540,39 @@ fn cellular_metrics(
 ) -> Option<CellularMetrics> {
     let access_technology = cellwan_status
         .and_then(|status| status.intf_current_access_technology.as_deref())
-        .and_then(canonicalize_label)
+        .and_then(sanitize_access_technology)
         .or_else(|| {
             cellwan_band
                 .and_then(|band| band.intf_current_access_technology.as_deref())
-                .and_then(canonicalize_label)
+                .and_then(sanitize_access_technology)
         })
         .or_else(|| {
             cellwan_band
                 .and_then(|band| band.intf_preferred_access_technology.as_deref())
-                .and_then(canonicalize_label)
+                .and_then(sanitize_access_technology)
         });
     let current_band = cellwan_status
         .and_then(|status| status.intf_current_band.as_deref())
-        .and_then(canonicalize_label)
+        .and_then(sanitize_band)
         .or_else(|| {
             cellwan_band
                 .and_then(|band| band.intf_current_band.as_deref())
-                .and_then(canonicalize_label)
+                .and_then(sanitize_band)
         });
     let preferred_access_technology = cellwan_band
         .and_then(|band| band.intf_preferred_access_technology.as_deref())
-        .and_then(canonicalize_label);
+        .and_then(sanitize_access_technology);
     let supported_access_technologies = cellwan_band
         .and_then(|band| band.intf_supported_access_technologies.as_deref())
-        .map(parse_label_list)
+        .map(parse_access_technology_list)
         .unwrap_or_default();
     let supported_bands = cellwan_band
         .and_then(|band| band.intf_supported_bands.as_deref())
-        .map(parse_label_list)
+        .map(parse_band_list)
         .unwrap_or_default();
     let preferred_bands = cellwan_band
         .and_then(|band| band.intf_preferred_bands.as_deref())
-        .map(parse_label_list)
+        .map(parse_band_list)
         .unwrap_or_default();
 
     let mut signals = Vec::new();
@@ -603,7 +612,7 @@ fn cellular_metrics(
             None,
         );
 
-        let nsa_band = status.nsa_band.as_deref().and_then(canonicalize_label);
+        let nsa_band = status.nsa_band.as_deref().and_then(sanitize_band);
         push_signal(
             &mut signals,
             RadioKind::NrNsa,
@@ -638,7 +647,7 @@ fn cellular_metrics(
         );
 
         for (carrier_index, carrier) in status.scc_info.iter().enumerate() {
-            let band = carrier.band.as_deref().and_then(canonicalize_label);
+            let band = carrier.band.as_deref().and_then(sanitize_band);
             push_signal(
                 &mut signals,
                 RadioKind::Scc,
@@ -688,7 +697,7 @@ fn cellular_metrics(
     let metrics = CellularMetrics {
         status: cellwan_status
             .and_then(|status| status.intf_status.as_deref())
-            .and_then(canonicalize_label),
+            .and_then(sanitize_status),
         access_technology,
         current_band,
         preferred_access_technology,
@@ -745,7 +754,7 @@ fn lan_port_statuses(status: Option<&StatusObject>) -> Vec<LanPortStatus> {
 
             Some(LanPortStatus {
                 port_name,
-                status: port.status.as_deref().and_then(canonicalize_label),
+                status: port.status.as_deref().and_then(sanitize_status),
                 max_bit_rate_mbps: port.max_bit_rate,
                 switch_to_wan: port.switch_to_wan,
             })
@@ -766,7 +775,7 @@ fn ip_interface_counters(
     Some(InterfaceCounters {
         interface_type: InterfaceType::Ip,
         interface_name,
-        status: metadata.status.as_deref().and_then(canonicalize_label),
+        status: metadata.status.as_deref().and_then(sanitize_status),
         max_bit_rate_mbps: None,
         bytes_sent: stats.bytes_sent,
         bytes_received: stats.bytes_received,
@@ -788,7 +797,7 @@ fn ethernet_interface_counters(
     Some(InterfaceCounters {
         interface_type: InterfaceType::Ethernet,
         interface_name,
-        status: metadata.status.as_deref().and_then(canonicalize_label),
+        status: metadata.status.as_deref().and_then(sanitize_status),
         max_bit_rate_mbps: metadata.max_bit_rate,
         bytes_sent: stats.bytes_sent,
         bytes_received: stats.bytes_received,
@@ -820,8 +829,60 @@ fn push_signal(
     }
 }
 
-fn parse_label_list(value: &str) -> Vec<String> {
-    value.split(',').filter_map(canonicalize_label).collect()
+fn parse_access_technology_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .filter_map(sanitize_access_technology)
+        .collect()
+}
+
+fn parse_band_list(value: &str) -> Vec<String> {
+    value.split(',').filter_map(sanitize_band).collect()
+}
+
+fn sanitize_status(value: &str) -> Option<String> {
+    let status = canonicalize_label(value)?;
+    match status.as_str() {
+        "up" | "down" | "connected" | "disconnected" | "active" | "inactive"
+        | "enabled" | "disabled" | "unknown" => Some(status),
+        _ => None,
+    }
+}
+
+fn sanitize_access_technology(value: &str) -> Option<String> {
+    let technology = canonicalize_label(value)?;
+    match technology.as_str() {
+        "lte" | "4g" => Some("lte".to_string()),
+        "nr5g_nsa" | "nr_nsa" | "5g_nsa" => Some("nr5g_nsa".to_string()),
+        "nr5g_sa" | "nr_sa" | "5g_sa" => Some("nr5g_sa".to_string()),
+        "nr5g" | "nr" | "5g" => Some("nr5g".to_string()),
+        "umts" | "wcdma" | "3g" => Some("umts".to_string()),
+        "gsm" | "2g" => Some("gsm".to_string()),
+        _ => None,
+    }
+}
+
+fn sanitize_band(value: &str) -> Option<String> {
+    let band = canonicalize_label(value)?;
+    if band == "auto" {
+        return Some(band);
+    }
+
+    if let Some(digits) = band.strip_prefix('b')
+        && !digits.is_empty()
+        && digits.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return Some(format!("b{digits}"));
+    }
+
+    if let Some(digits) = band.strip_prefix('n')
+        && !digits.is_empty()
+        && digits.chars().all(|ch| ch.is_ascii_digit())
+    {
+        return Some(format!("n{digits}"));
+    }
+
+    None
 }
 
 fn canonicalize_label(value: &str) -> Option<String> {
@@ -860,7 +921,27 @@ fn sanitize_safe_name(value: &str) -> Option<String> {
         return None;
     }
 
-    canonicalize_label(trimmed)
+    let normalized = canonicalize_label(trimmed)?;
+    is_allowed_interface_like_name(&normalized).then_some(normalized)
+}
+
+fn is_allowed_interface_like_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && (matches_prefix_with_digits(value, "lan")
+            || matches_prefix_with_digits(value, "wan")
+            || matches_prefix_with_digits(value, "wwan")
+            || matches_prefix_with_digits(value, "eth")
+            || matches_prefix_with_digits(value, "wlan")
+            || matches_prefix_with_digits(value, "usb")
+            || matches_prefix_with_digits(value, "br")
+            || matches_prefix_with_digits(value, "bridge"))
+}
+
+fn matches_prefix_with_digits(value: &str, prefix: &str) -> bool {
+    value
+        .strip_prefix(prefix)
+        .is_some_and(|suffix| !suffix.is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 fn looks_like_ipv4(value: &str) -> bool {
