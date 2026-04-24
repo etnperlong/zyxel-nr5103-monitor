@@ -9,6 +9,9 @@ pub struct AppConfig {
     pub log_level: String,
     pub router: RouterConfig,
     pub monitor: MonitorConfig,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -34,12 +37,53 @@ pub struct MonitorConfig {
     pub min_reboot_interval: Duration,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct TelemetryConfig {
+    #[serde(default = "default_service_name")]
+    pub service_name: String,
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default = "default_export_interval_secs", with = "duration_secs")]
+    pub export_interval: Duration,
+    #[serde(default)]
+    pub metrics: TelemetrySignalConfig,
+    #[serde(default)]
+    pub traces: TelemetrySignalConfig,
+    #[serde(default)]
+    pub logs: TelemetrySignalConfig,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            service_name: default_service_name(),
+            endpoint: None,
+            export_interval: default_export_interval_secs(),
+            metrics: TelemetrySignalConfig::default(),
+            traces: TelemetrySignalConfig::default(),
+            logs: TelemetrySignalConfig::default(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct TelemetrySignalConfig {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 fn default_log_level() -> String {
     "info".to_string()
 }
 
 fn default_router_protocol() -> String {
     "http".to_string()
+}
+
+fn default_service_name() -> String {
+    "zyxel-nr5103-monitor".to_string()
 }
 
 fn default_interval_secs() -> Duration {
@@ -52,6 +96,10 @@ fn default_url() -> String {
 
 fn default_timeout_secs() -> Duration {
     Duration::from_secs(5)
+}
+
+fn default_export_interval_secs() -> Duration {
+    Duration::from_secs(60)
 }
 
 fn default_max_retries() -> u32 {
