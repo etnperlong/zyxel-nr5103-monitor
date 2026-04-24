@@ -5,7 +5,7 @@ mod telemetry;
 
 use anyhow::Result;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -37,8 +37,18 @@ async fn main() -> Result<()> {
 
     let shutdown_result = telemetry.shutdown();
 
+    if let Err(shutdown_error) = shutdown_result {
+        if monitor_result.is_err() {
+            warn!(
+                error = %shutdown_error,
+                "Telemetry shutdown failed while monitor was already failing"
+            );
+        } else {
+            return Err(shutdown_error);
+        }
+    }
+
     monitor_result?;
-    shutdown_result?;
 
     Ok(())
 }

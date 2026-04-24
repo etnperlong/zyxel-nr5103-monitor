@@ -40,12 +40,11 @@ impl Monitor {
                             debug!(rtt_ms = rtt.as_millis(), "Network OK");
                             failure_count = 0;
                         }
-                        Err(err) => {
+                        Err(_err) => {
                             failure_count += 1;
                             warn!(
                                 failure_count,
                                 max_retries = self.config.max_retries,
-                                error = %err,
                                 "Connectivity check failed"
                             );
 
@@ -57,8 +56,8 @@ impl Monitor {
                                 if cooldown_ok {
                                     info!("Triggering router reboot after {} failures", failure_count);
 
-                                    if let Err(err) = self.recovery().await {
-                                        error!(error = %err, "Recovery failed");
+                                    if let Err(_err) = self.recovery().await {
+                                        error!("Recovery failed");
                                     } else {
                                         last_reboot = Some(Instant::now());
                                         failure_count = 0;
@@ -78,8 +77,8 @@ impl Monitor {
         }
 
         info!("Monitor stopping, logging out...");
-        if let Err(err) = self.client.logout().await {
-            error!(error = %err, "Logout failed");
+        if let Err(_err) = self.client.logout().await {
+            error!("Logout failed");
         }
         info!("Monitor stopped");
         Ok(())
@@ -104,8 +103,8 @@ impl Monitor {
     }
 
     async fn check_auth(&self) -> Result<()> {
-        if let Err(err) = self.client.get_basic_information().await {
-            warn!(error = %err, "Session check failed, re-logging in");
+        if let Err(_err) = self.client.get_basic_information().await {
+            warn!("Session check failed, re-logging in");
             let _ = self.client.logout().await;
             self.client.login().await?;
         }
