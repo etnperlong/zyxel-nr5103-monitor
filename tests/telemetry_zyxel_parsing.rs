@@ -323,7 +323,10 @@ fn router_telemetry_snapshot_drops_sensitive_text_like_values() {
     let cellular = snapshot.cellular.expect("cellular metrics should exist");
     assert_eq!(cellular.access_technology, None);
     assert_eq!(cellular.current_band, None);
-    assert_eq!(cellular.supported_access_technologies, vec!["lte", "nr5g_nsa"]);
+    assert_eq!(
+        cellular.supported_access_technologies,
+        vec!["lte", "nr5g_nsa"]
+    );
     assert_eq!(cellular.supported_bands, vec!["b3", "n78"]);
 }
 

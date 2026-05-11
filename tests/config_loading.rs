@@ -240,7 +240,8 @@ export_interval = 15
     )
     .expect("config file should be written");
 
-    let loaded = config::load_config().expect("config should load with explicit telemetry settings");
+    let loaded =
+        config::load_config().expect("config should load with explicit telemetry settings");
 
     assert_eq!(
         loaded.telemetry.endpoint.as_deref(),

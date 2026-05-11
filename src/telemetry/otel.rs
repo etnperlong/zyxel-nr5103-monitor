@@ -1,5 +1,7 @@
-use anyhow::{Result, anyhow, bail, Context};
-use opentelemetry::{KeyValue, metrics::Meter, metrics::MeterProvider as _, trace::TracerProvider as _};
+use anyhow::{Context, Result, anyhow, bail};
+use opentelemetry::{
+    KeyValue, metrics::Meter, metrics::MeterProvider as _, trace::TracerProvider as _,
+};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
