@@ -13,7 +13,7 @@ const ACCESS_TECHNOLOGY_NR5G_SA: &str = "NR5G-SA";
 
 enum RecoveryOutcome {
     ConnectivityRestored,
-    Rebooted,
+    Rebooted { rebooted_at: Instant },
 }
 
 pub struct Monitor {
@@ -81,7 +81,7 @@ impl Monitor {
 
                             if failure_count >= self.config.max_retries {
                                 let reboot_allowed = last_reboot
-                                    .map(|instant| instant.elapsed() >= self.config.min_reboot_interval)
+                                    .map(|instant| instant.elapsed() >= self.config.reboot.min_interval)
                                     .unwrap_or(true);
 
                                 info!("Triggering connection recovery after {} failures", failure_count);
@@ -90,8 +90,8 @@ impl Monitor {
                                     Ok(RecoveryOutcome::ConnectivityRestored) => {
                                         failure_count = 0;
                                     }
-                                    Ok(RecoveryOutcome::Rebooted) => {
-                                        last_reboot = Some(Instant::now());
+                                    Ok(RecoveryOutcome::Rebooted { rebooted_at }) => {
+                                        last_reboot = Some(rebooted_at);
                                         failure_count = 0;
                                     }
                                     Err(err) => {
@@ -139,16 +139,15 @@ impl Monitor {
         self.check_auth().await?;
 
         match self.config.recovery_method {
-            RecoveryMethod::AccessTechnologySwitchThenReboot => {
-                match self.try_access_technology_recovery().await {
+            RecoveryMethod::Reload => {
+                match self.try_reload_recovery().await {
                     Ok(true) => return Ok(RecoveryOutcome::ConnectivityRestored),
                     Ok(false) => warn!(
-                        "Access technology recovery did not restore connectivity, falling back to reboot"
+                        "Reload recovery did not restore connectivity, falling back to reboot"
                     ),
-                    Err(err) => warn!(
-                        error = %err,
-                        "Access technology recovery failed, falling back to reboot"
-                    ),
+                    Err(err) => {
+                        warn!(error = %err, "Reload recovery failed, falling back to reboot")
+                    }
                 }
 
                 if !reboot_allowed {
@@ -181,7 +180,7 @@ impl Monitor {
         Ok(())
     }
 
-    async fn try_access_technology_recovery(&self) -> Result<bool> {
+    async fn try_reload_recovery(&self) -> Result<bool> {
         let original = self.client.get_cellwan_band().await?;
         let original_preferred = original.preferred_access_technology.clone();
         let temporary_preferred = if original_preferred == ACCESS_TECHNOLOGY_NR5G_SA {
@@ -198,7 +197,7 @@ impl Monitor {
             "Temporarily switching preferred access technology"
         );
         self.client.set_cellwan_band(&switch_config).await?;
-        sleep(self.config.access_technology_switch_wait).await;
+        sleep(self.config.reload.switch_wait).await;
 
         let mut restore_config = original;
         restore_config.preferred_access_technology = original_preferred;
@@ -208,7 +207,7 @@ impl Monitor {
             "Restoring preferred access technology"
         );
         self.client.set_cellwan_band(&restore_config).await?;
-        sleep(self.config.access_technology_restore_wait).await;
+        sleep(self.config.reload.restore_wait).await;
 
         match self.check_connectivity().await {
             Ok(_) => Ok(true),
@@ -229,11 +228,20 @@ impl Monitor {
         }
 
         self.client.reboot().await?;
+        let rebooted_at = Instant::now();
 
         if let Some(telemetry) = self.telemetry.as_ref() {
             telemetry.record_reboot_success();
         }
 
-        Ok(RecoveryOutcome::Rebooted)
+        if !self.config.reboot.wait_after.is_zero() {
+            info!(
+                wait_after_secs = self.config.reboot.wait_after.as_secs(),
+                "Waiting after reboot before resuming connectivity checks"
+            );
+            sleep(self.config.reboot.wait_after).await;
+        }
+
+        Ok(RecoveryOutcome::Rebooted { rebooted_at })
     }
 }

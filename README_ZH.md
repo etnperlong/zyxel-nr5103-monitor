@@ -52,27 +52,61 @@ interval = 15
 url = "https://www.gstatic.com/generate_204"
 timeout = 10
 max_retries = 4
-min_reboot_interval = 3600
-recovery_method = "access_technology_switch_then_reboot"
-access_technology_switch_wait = 15
-access_technology_restore_wait = 15
+recovery_method = "reload"
+
+[monitor.reboot]
+min_interval = 3600
+wait_after = 60
+
+[monitor.reload]
+switch_wait = 15
+restore_wait = 15
 ```
 
 ### 配置字段说明
 
+#### 顶层配置
+
 - `log_level`：日志级别，例如 `info`、`debug`
-- `router.host`：路由器地址，不包含协议前缀
-- `router.protocol`：可选协议，支持 `http` 或 `https`，默认值为 `http`
-- `router.username`：路由器用户名
-- `router.password`：路由器密码
-- `monitor.interval`：连通性检查间隔，单位秒
-- `monitor.url`：用于检测外网连通性的 URL
-- `monitor.timeout`：请求超时时间，单位秒
-- `monitor.max_retries`：连续失败多少次后触发恢复逻辑
-- `monitor.min_reboot_interval`：两次重启之间的最小间隔，单位秒
-- `monitor.recovery_method`：恢复策略，可选 `access_technology_switch_then_reboot`（默认）或 `reboot`
-- `monitor.access_technology_switch_wait`：临时切换 Preferred Access Technology 后等待的秒数
-- `monitor.access_technology_restore_wait`：切换回原有 Preferred Access Technology 后等待的秒数
+
+#### `[router]`
+
+- `host`：路由器地址，不包含 `http://` 或 `https://` 前缀
+- `protocol`：可选 `http` 或 `https`，默认值为 `http`
+- `username`：路由器用户名
+- `password`：路由器密码
+
+#### `[monitor]`
+
+- `interval`：连通性检查间隔，单位秒
+- `url`：用于检测外网连通性的 URL
+- `timeout`：请求超时时间，单位秒
+- `max_retries`：连续失败多少次后触发恢复逻辑
+- `recovery_method`：恢复策略：
+  - `reload`（默认）：先临时切换 Preferred Access Technology，再切换回来；如果仍未恢复连通性，则回退到重启
+  - `reboot`：跳过 reload 步骤，直接重启
+
+#### `[monitor.reboot]`
+
+- `min_interval`：两次重启之间的最小间隔，单位秒
+- `wait_after`：执行重启后等待多少秒，再恢复连通性检查
+
+#### `[monitor.reload]`
+
+- `switch_wait`：临时切换 Preferred Access Technology 后等待的秒数
+- `restore_wait`：切换回原有 Preferred Access Technology 后等待的秒数
+
+#### 默认值
+
+- `monitor.interval = 60`
+- `monitor.url = "http://www.gstatic.com/generate_204"`
+- `monitor.timeout = 5`
+- `monitor.max_retries = 1`
+- `monitor.recovery_method = "reload"`
+- `monitor.reboot.min_interval = 300`
+- `monitor.reboot.wait_after = 60`
+- `monitor.reload.switch_wait = 15`
+- `monitor.reload.restore_wait = 15`
 
 ## 构建
 

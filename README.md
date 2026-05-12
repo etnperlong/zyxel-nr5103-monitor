@@ -52,27 +52,61 @@ interval = 15
 url = "https://www.gstatic.com/generate_204"
 timeout = 10
 max_retries = 4
-min_reboot_interval = 3600
-recovery_method = "access_technology_switch_then_reboot"
-access_technology_switch_wait = 15
-access_technology_restore_wait = 15
+recovery_method = "reload"
+
+[monitor.reboot]
+min_interval = 3600
+wait_after = 60
+
+[monitor.reload]
+switch_wait = 15
+restore_wait = 15
 ```
 
 ### Config fields
 
-- `log_level`: tracing filter, e.g. `info`, `debug`
-- `router.host`: router hostname or address without protocol prefix
-- `router.protocol`: optional router protocol, `http` or `https`; defaults to `http`
-- `router.username`: router login username
-- `router.password`: router login password
-- `monitor.interval`: connectivity check interval in seconds
-- `monitor.url`: URL used for external connectivity checks
-- `monitor.timeout`: request timeout in seconds
-- `monitor.max_retries`: consecutive failures before recovery triggers
-- `monitor.min_reboot_interval`: minimum seconds between reboots
-- `monitor.recovery_method`: recovery strategy, `access_technology_switch_then_reboot` (default) or `reboot`
-- `monitor.access_technology_switch_wait`: seconds to wait after temporarily switching preferred access technology
-- `monitor.access_technology_restore_wait`: seconds to wait after switching the preferred access technology back
+#### Top-level
+
+- `log_level`: tracing filter such as `info` or `debug`
+
+#### `[router]`
+
+- `host`: router hostname or address, without `http://` or `https://`
+- `protocol`: `http` or `https`, defaults to `http`
+- `username`: router login username
+- `password`: router login password
+
+#### `[monitor]`
+
+- `interval`: seconds between connectivity checks
+- `url`: URL used for external connectivity checks
+- `timeout`: request timeout in seconds
+- `max_retries`: number of consecutive failures before recovery starts
+- `recovery_method`: recovery flow to use:
+  - `reload` (default): temporarily switch the preferred access technology, switch it back, then reboot if the connection is still down
+  - `reboot`: skip the reload step and reboot immediately
+
+#### `[monitor.reboot]`
+
+- `min_interval`: minimum seconds between two reboot attempts
+- `wait_after`: seconds to wait after issuing a reboot before connectivity checks resume
+
+#### `[monitor.reload]`
+
+- `switch_wait`: seconds to wait after switching the preferred access technology
+- `restore_wait`: seconds to wait after switching the preferred access technology back
+
+#### Defaults
+
+- `monitor.interval = 60`
+- `monitor.url = "http://www.gstatic.com/generate_204"`
+- `monitor.timeout = 5`
+- `monitor.max_retries = 1`
+- `monitor.recovery_method = "reload"`
+- `monitor.reboot.min_interval = 300`
+- `monitor.reboot.wait_after = 60`
+- `monitor.reload.switch_wait = 15`
+- `monitor.reload.restore_wait = 15`
 
 ## Build
 

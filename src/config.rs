@@ -32,27 +32,54 @@ pub struct MonitorConfig {
     pub timeout: Duration,
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
-    #[serde(default = "default_min_reboot_interval_secs", with = "duration_secs")]
-    pub min_reboot_interval: Duration,
     #[serde(default = "default_recovery_method")]
     pub recovery_method: RecoveryMethod,
-    #[serde(
-        default = "default_access_technology_switch_wait_secs",
-        with = "duration_secs"
-    )]
-    pub access_technology_switch_wait: Duration,
-    #[serde(
-        default = "default_access_technology_restore_wait_secs",
-        with = "duration_secs"
-    )]
-    pub access_technology_restore_wait: Duration,
+    #[serde(default)]
+    pub reboot: RebootConfig,
+    #[serde(default)]
+    pub reload: ReloadConfig,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RecoveryMethod {
-    AccessTechnologySwitchThenReboot,
+    #[serde(alias = "access_technology_switch_then_reboot")]
+    Reload,
     Reboot,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct RebootConfig {
+    #[serde(default = "default_min_reboot_interval_secs", with = "duration_secs")]
+    pub min_interval: Duration,
+    #[serde(default = "default_reboot_wait_after_secs", with = "duration_secs")]
+    pub wait_after: Duration,
+}
+
+impl Default for RebootConfig {
+    fn default() -> Self {
+        Self {
+            min_interval: default_min_reboot_interval_secs(),
+            wait_after: default_reboot_wait_after_secs(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ReloadConfig {
+    #[serde(default = "default_reload_switch_wait_secs", with = "duration_secs")]
+    pub switch_wait: Duration,
+    #[serde(default = "default_reload_restore_wait_secs", with = "duration_secs")]
+    pub restore_wait: Duration,
+}
+
+impl Default for ReloadConfig {
+    fn default() -> Self {
+        Self {
+            switch_wait: default_reload_switch_wait_secs(),
+            restore_wait: default_reload_restore_wait_secs(),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -126,15 +153,19 @@ fn default_min_reboot_interval_secs() -> Duration {
     Duration::from_secs(300)
 }
 
-fn default_recovery_method() -> RecoveryMethod {
-    RecoveryMethod::AccessTechnologySwitchThenReboot
+fn default_reboot_wait_after_secs() -> Duration {
+    Duration::from_secs(60)
 }
 
-fn default_access_technology_switch_wait_secs() -> Duration {
+fn default_recovery_method() -> RecoveryMethod {
+    RecoveryMethod::Reload
+}
+
+fn default_reload_switch_wait_secs() -> Duration {
     Duration::from_secs(15)
 }
 
-fn default_access_technology_restore_wait_secs() -> Duration {
+fn default_reload_restore_wait_secs() -> Duration {
     Duration::from_secs(15)
 }
 

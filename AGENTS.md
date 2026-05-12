@@ -18,7 +18,7 @@
 ## Config source-of-truth notes
 - Hard-coded config search order in `src/config.rs`: `./config.toml` -> `$HOME/.config/nr5103/config.toml` -> `/etc/nr5103/config.toml`.
 - `src/config.rs` is the source of truth for omitted-field defaults, not `README.md` or the sample `config.toml`.
-- Actual monitor defaults are: `interval=60s`, `url=http://www.gstatic.com/generate_204`, `timeout=5s`, `max_retries=1`, `min_reboot_interval=300s`.
+- Actual monitor defaults are: `interval=60s`, `url=http://www.gstatic.com/generate_204`, `timeout=5s`, `max_retries=1`, `recovery_method=reload`, `monitor.reboot.min_interval=300s`, `monitor.reboot.wait_after=60s`, `monitor.reload.switch_wait=15s`, `monitor.reload.restore_wait=15s`.
 - Telemetry config already exists in code even though docs/sample config lag it:
   - `[telemetry] service_name, endpoint, export_interval`
   - `[telemetry.metrics].enabled`

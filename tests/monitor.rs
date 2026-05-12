@@ -12,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 use zyxel_nr5103_monitor::{
     client::ZyxelClient,
-    config::{MonitorConfig, RecoveryMethod, RouterConfig},
+    config::{MonitorConfig, RebootConfig, RecoveryMethod, ReloadConfig, RouterConfig},
     monitor::Monitor,
 };
 
@@ -87,6 +87,28 @@ fn encrypt_response_payload(aes_key: &[u8; 32], payload: &str) -> String {
     .to_string()
 }
 
+fn test_monitor_config(
+    url: String,
+    max_retries: u32,
+    recovery_method: RecoveryMethod,
+) -> MonitorConfig {
+    MonitorConfig {
+        interval: Duration::from_secs(60),
+        url,
+        timeout: Duration::from_secs(2),
+        max_retries,
+        recovery_method,
+        reboot: RebootConfig {
+            min_interval: Duration::from_secs(300),
+            wait_after: Duration::from_millis(10),
+        },
+        reload: ReloadConfig {
+            switch_wait: Duration::from_millis(10),
+            restore_wait: Duration::from_millis(10),
+        },
+    }
+}
+
 #[tokio::test]
 async fn monitor_new_builds_with_router_client_and_config() {
     let rsa_response = http_response(
@@ -112,16 +134,11 @@ async fn monitor_new_builds_with_router_client_and_config() {
 
     let monitor = Monitor::new(
         client,
-        MonitorConfig {
-            interval: Duration::from_secs(60),
-            url: "http://www.gstatic.com/generate_204".to_string(),
-            timeout: Duration::from_secs(2),
-            max_retries: 1,
-            min_reboot_interval: Duration::from_secs(300),
-            recovery_method: RecoveryMethod::AccessTechnologySwitchThenReboot,
-            access_technology_switch_wait: Duration::from_millis(10),
-            access_technology_restore_wait: Duration::from_millis(10),
-        },
+        test_monitor_config(
+            "http://www.gstatic.com/generate_204".to_string(),
+            1,
+            RecoveryMethod::Reload,
+        ),
     );
 
     assert!(monitor.is_ok());
@@ -155,16 +172,7 @@ async fn monitor_run_checks_connectivity_and_logs_out_on_sigint() {
 
     let monitor = Monitor::new(
         client,
-        MonitorConfig {
-            interval: Duration::from_secs(60),
-            url: format!("{host}/generate_204"),
-            timeout: Duration::from_secs(2),
-            max_retries: 3,
-            min_reboot_interval: Duration::from_secs(300),
-            recovery_method: RecoveryMethod::AccessTechnologySwitchThenReboot,
-            access_technology_switch_wait: Duration::from_millis(10),
-            access_technology_restore_wait: Duration::from_millis(10),
-        },
+        test_monitor_config(format!("{host}/generate_204"), 3, RecoveryMethod::Reload),
     )
     .unwrap();
 
@@ -224,16 +232,7 @@ async fn metrics_disabled_does_not_poll_dal() {
 
     let monitor = Monitor::new(
         client,
-        MonitorConfig {
-            interval: Duration::from_secs(60),
-            url: format!("{host}/generate_204"),
-            timeout: Duration::from_secs(2),
-            max_retries: 3,
-            min_reboot_interval: Duration::from_secs(300),
-            recovery_method: RecoveryMethod::AccessTechnologySwitchThenReboot,
-            access_technology_switch_wait: Duration::from_millis(10),
-            access_technology_restore_wait: Duration::from_millis(10),
-        },
+        test_monitor_config(format!("{host}/generate_204"), 3, RecoveryMethod::Reload),
     )
     .unwrap();
 
@@ -392,16 +391,7 @@ async fn monitor_reauthenticates_and_reboots_after_connectivity_failure_when_con
 
     let monitor = Monitor::new(
         Arc::clone(&client),
-        MonitorConfig {
-            interval: Duration::from_secs(60),
-            url: format!("{host}/generate_204"),
-            timeout: Duration::from_secs(2),
-            max_retries: 1,
-            min_reboot_interval: Duration::from_secs(300),
-            recovery_method: RecoveryMethod::Reboot,
-            access_technology_switch_wait: Duration::from_millis(10),
-            access_technology_restore_wait: Duration::from_millis(10),
-        },
+        test_monitor_config(format!("{host}/generate_204"), 1, RecoveryMethod::Reboot),
     )
     .unwrap();
 
@@ -644,16 +634,7 @@ async fn monitor_switches_access_technology_and_skips_reboot_when_connectivity_r
 
     let monitor = Monitor::new(
         Arc::clone(&client),
-        MonitorConfig {
-            interval: Duration::from_secs(60),
-            url: format!("{host}/generate_204"),
-            timeout: Duration::from_secs(2),
-            max_retries: 1,
-            min_reboot_interval: Duration::from_secs(300),
-            recovery_method: RecoveryMethod::AccessTechnologySwitchThenReboot,
-            access_technology_switch_wait: Duration::from_millis(10),
-            access_technology_restore_wait: Duration::from_millis(10),
-        },
+        test_monitor_config(format!("{host}/generate_204"), 1, RecoveryMethod::Reload),
     )
     .unwrap();
 
@@ -895,16 +876,7 @@ async fn monitor_reboots_when_access_technology_recovery_does_not_restore_connec
 
     let monitor = Monitor::new(
         Arc::clone(&client),
-        MonitorConfig {
-            interval: Duration::from_secs(60),
-            url: format!("{host}/generate_204"),
-            timeout: Duration::from_secs(2),
-            max_retries: 1,
-            min_reboot_interval: Duration::from_secs(300),
-            recovery_method: RecoveryMethod::AccessTechnologySwitchThenReboot,
-            access_technology_switch_wait: Duration::from_millis(10),
-            access_technology_restore_wait: Duration::from_millis(10),
-        },
+        test_monitor_config(format!("{host}/generate_204"), 1, RecoveryMethod::Reload),
     )
     .unwrap();
 
