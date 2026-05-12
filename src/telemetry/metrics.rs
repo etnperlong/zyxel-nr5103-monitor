@@ -85,6 +85,22 @@ impl TelemetryCollector {
         self.recorder.record_reload_failure(duration);
     }
 
+    pub fn record_signal_degraded(&self, reason: &'static str) {
+        self.recorder.record_signal_degraded(reason);
+    }
+
+    pub fn record_signal_recovery_attempt(&self) {
+        self.recorder.record_signal_recovery_attempt();
+    }
+
+    pub fn record_signal_recovery_success(&self) {
+        self.recorder.record_signal_recovery_success();
+    }
+
+    pub fn record_signal_recovery_failure(&self) {
+        self.recorder.record_signal_recovery_failure();
+    }
+
     async fn fetch_dal<T>(&self, oid: DalOid) -> Result<T>
     where
         T: DeserializeOwned,
@@ -115,6 +131,10 @@ pub struct MetricRecorder {
     monitor_reload_successes: Counter<u64>,
     monitor_reload_failures: Counter<u64>,
     monitor_reload_duration_seconds: Histogram<f64>,
+    monitor_signal_degraded: Counter<u64>,
+    monitor_signal_recovery_attempts: Counter<u64>,
+    monitor_signal_recovery_successes: Counter<u64>,
+    monitor_signal_recovery_failures: Counter<u64>,
     interface_baselines: HashMap<InterfaceCounterKey, InterfaceCounterBaseline>,
 }
 
@@ -180,6 +200,18 @@ impl MetricRecorder {
                 .f64_histogram("zyxel.monitor.reload.duration.seconds")
                 .with_unit("s")
                 .build(),
+            monitor_signal_degraded: meter
+                .u64_counter("zyxel.monitor.signal.degraded")
+                .build(),
+            monitor_signal_recovery_attempts: meter
+                .u64_counter("zyxel.monitor.signal.recovery.attempts")
+                .build(),
+            monitor_signal_recovery_successes: meter
+                .u64_counter("zyxel.monitor.signal.recovery.successes")
+                .build(),
+            monitor_signal_recovery_failures: meter
+                .u64_counter("zyxel.monitor.signal.recovery.failures")
+                .build(),
             interface_baselines: HashMap::new(),
         }
     }
@@ -233,6 +265,23 @@ impl MetricRecorder {
         self.monitor_reload_failures.add(1, &[]);
         self.monitor_reload_duration_seconds
             .record(duration.as_secs_f64(), &[]);
+    }
+
+    pub fn record_signal_degraded(&self, reason: &'static str) {
+        self.monitor_signal_degraded
+            .add(1, &[KeyValue::new("reason", reason)]);
+    }
+
+    pub fn record_signal_recovery_attempt(&self) {
+        self.monitor_signal_recovery_attempts.add(1, &[]);
+    }
+
+    pub fn record_signal_recovery_success(&self) {
+        self.monitor_signal_recovery_successes.add(1, &[]);
+    }
+
+    pub fn record_signal_recovery_failure(&self) {
+        self.monitor_signal_recovery_failures.add(1, &[]);
     }
 
     fn record_system(&self, system: &SystemMetrics) {

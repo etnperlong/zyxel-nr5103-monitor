@@ -21,6 +21,12 @@ wait_after = 60
 switch_wait = 15
 restore_wait = 15
 
+[monitor.signal]
+enabled = true
+require_5g = true
+min_5g_rsrp = -110
+max_retries = 2
+
 [telemetry]
 service_name = "zyxel-nr5103-monitor"
 endpoint = "http://localhost:4317"

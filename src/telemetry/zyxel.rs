@@ -871,7 +871,7 @@ fn sanitize_status(value: &str) -> Option<String> {
     }
 }
 
-fn sanitize_access_technology(value: &str) -> Option<String> {
+pub(crate) fn sanitize_access_technology(value: &str) -> Option<String> {
     let technology = canonicalize_label(value)?;
     match technology.as_str() {
         "lte" | "4g" => Some("lte".to_string()),

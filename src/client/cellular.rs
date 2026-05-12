@@ -5,6 +5,7 @@ use super::{
     ZyxelClient,
     dal::{DalOid, DalResponse},
 };
+use crate::telemetry::zyxel::CellWanStatusObject;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CellWanBandConfig {
@@ -28,6 +29,13 @@ struct DalUpdateResponse {
 }
 
 impl ZyxelClient {
+    pub async fn get_cellwan_status(&self) -> Result<CellWanStatusObject> {
+        self.get_dal::<DalResponse<CellWanStatusObject>>(DalOid::CellWanStatus)
+            .await?
+            .into_first_object()
+            .context("No cellwan_status object returned from DAL endpoint")
+    }
+
     pub async fn get_cellwan_band(&self) -> Result<CellWanBandConfig> {
         self.get_dal::<DalResponse<CellWanBandConfig>>(DalOid::CellWanBand)
             .await?

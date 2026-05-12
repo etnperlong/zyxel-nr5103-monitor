@@ -80,6 +80,46 @@ password = "secret"
     assert_eq!(loaded.monitor.recovery_method, RecoveryMethod::Reload);
     assert_eq!(loaded.monitor.reload.switch_wait, Duration::from_secs(15));
     assert_eq!(loaded.monitor.reload.restore_wait, Duration::from_secs(15));
+    assert!(!loaded.monitor.signal.enabled);
+    assert!(!loaded.monitor.signal.require_5g);
+    assert_eq!(loaded.monitor.signal.min_5g_rsrp, -110.0);
+    assert_eq!(loaded.monitor.signal.max_retries, 1);
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_config_allows_explicit_signal_monitor_settings() {
+    let _env_guard = lock_env();
+    let temp_dir = unique_temp_dir();
+    let _dir_guard = CurrentDirGuard::change_to(&temp_dir);
+
+    fs::write(
+        temp_dir.join("config.toml"),
+        r#"
+[router]
+host = "172.16.0.1"
+username = "monitor"
+password = "secret"
+
+[monitor]
+
+[monitor.signal]
+enabled = true
+require_5g = true
+min_5g_rsrp = -105
+max_retries = 3
+"#,
+    )
+    .expect("config file should be written");
+
+    let loaded =
+        config::load_config().expect("config should load with explicit signal monitoring");
+
+    assert!(loaded.monitor.signal.enabled);
+    assert!(loaded.monitor.signal.require_5g);
+    assert_eq!(loaded.monitor.signal.min_5g_rsrp, -105.0);
+    assert_eq!(loaded.monitor.signal.max_retries, 3);
 
     fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }

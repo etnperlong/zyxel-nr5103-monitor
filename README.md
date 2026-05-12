@@ -7,6 +7,7 @@ It can:
 - log in to the router over HTTP or HTTPS
 - handle the router's encrypted HTTP login flow
 - periodically check external connectivity
+- optionally monitor degraded 5G signal quality or fallback to 4G
 - re-authenticate if the session expires
 - recover connectivity via access-technology reload before rebooting
 - reboot the router after repeated failures
@@ -65,6 +66,12 @@ wait_after = 60
 switch_wait = 15
 restore_wait = 15
 
+[monitor.signal]
+enabled = true
+require_5g = true
+min_5g_rsrp = -110
+max_retries = 2
+
 [telemetry]
 service_name = "zyxel-nr5103-monitor"
 endpoint = "http://localhost:4317"
@@ -94,7 +101,7 @@ enabled = false
 - `timeout`: request timeout in seconds
 - `max_retries`: number of consecutive failures before recovery starts
 - `recovery_method`: recovery flow to use:
-  - `reload` (default): temporarily switch the preferred access technology, switch it back, then reboot if the connection is still down
+  - `reload` (default): temporarily switch the preferred access technology, switch it back, then reboot if the monitored condition is still unhealthy
   - `reboot`: skip the reload step and reboot immediately
 
 #### `[monitor.reboot]`
@@ -107,6 +114,13 @@ enabled = false
 - `switch_wait`: seconds to wait after switching the preferred access technology
 - `restore_wait`: seconds to wait after switching the preferred access technology back
 
+#### `[monitor.signal]`
+
+- `enabled`: enable signal-quality monitoring, defaults to `false`
+- `require_5g`: treat fallback to non-5G access technology as degraded, defaults to `false`
+- `min_5g_rsrp`: minimum acceptable 5G RSRP in dBm before recovery starts, defaults to `-110`
+- `max_retries`: number of consecutive degraded signal checks before recovery starts, defaults to `1`
+
 #### Defaults
 
 - `monitor.interval = 60`
@@ -118,6 +132,10 @@ enabled = false
 - `monitor.reboot.wait_after = 60`
 - `monitor.reload.switch_wait = 15`
 - `monitor.reload.restore_wait = 15`
+- `monitor.signal.enabled = false`
+- `monitor.signal.require_5g = false`
+- `monitor.signal.min_5g_rsrp = -110`
+- `monitor.signal.max_retries = 1`
 
 #### `[telemetry]`
 
@@ -296,6 +314,17 @@ enabled = false   # not yet implemented
 | `zyxel.monitor.connectivity.rtt.ms`     | Histogram | `ms`   | Round-trip latency of connectivity checks |
 | `zyxel.monitor.connectivity.failures`   | Counter   | —    | Connectivity check failure count         |
 
+#### Signal-quality monitoring
+
+| Name                                          | Type    | Unit | Attributes | Description                                      |
+| --------------------------------------------- | ------- | ---- | ---------- | ------------------------------------------------ |
+| `zyxel.monitor.signal.degraded`                 | Counter | —    | `reason`   | Degraded signal-quality checks                   |
+| `zyxel.monitor.signal.recovery.attempts`        | Counter | —    | —          | Recovery attempts triggered by degraded signal   |
+| `zyxel.monitor.signal.recovery.successes`       | Counter | —    | —          | Successful recoveries triggered by signal checks |
+| `zyxel.monitor.signal.recovery.failures`        | Counter | —    | —          | Failed recoveries triggered by signal checks     |
+
+`reason` values: `missing_5g`, `weak_5g_rsrp`
+
 #### Recovery: reboot
 
 | Name                                | Type    | Unit | Description                              |
@@ -308,8 +337,8 @@ enabled = false   # not yet implemented
 | Name                                    | Type      | Unit | Description                              |
 | --------------------------------------- | --------- | ---- | ---------------------------------------- |
 | `zyxel.monitor.reload.attempts`           | Counter   | —    | Reload recovery attempts                 |
-| `zyxel.monitor.reload.successes`          | Counter   | —    | Reload recoveries that restored connectivity |
-| `zyxel.monitor.reload.failures`           | Counter   | —    | Reload recoveries that failed to restore connectivity |
+| `zyxel.monitor.reload.successes`          | Counter   | —    | Reload recoveries that restored the monitored condition |
+| `zyxel.monitor.reload.failures`           | Counter   | —    | Reload recoveries that failed to restore the monitored condition |
 | `zyxel.monitor.reload.duration.seconds`   | Histogram | `s`    | Total duration of reload recovery cycles |
 
 ### Privacy

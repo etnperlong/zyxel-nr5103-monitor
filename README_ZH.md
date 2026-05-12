@@ -7,6 +7,7 @@
 - 通过 HTTP 或 HTTPS 登录路由器
 - 处理路由器在 HTTP 模式下的加密登录流程
 - 定期检查外网连通性
+- 可选地监控 5G 信号质量劣化或退回 4G 的情况
 - 在会话失效时重新认证
 - 通过接入技术重载恢复连通性，失败后再重启路由器
 - 在多次失败后自动重启路由器
@@ -65,6 +66,12 @@ wait_after = 60
 switch_wait = 15
 restore_wait = 15
 
+[monitor.signal]
+enabled = true
+require_5g = true
+min_5g_rsrp = -110
+max_retries = 2
+
 [telemetry]
 service_name = "zyxel-nr5103-monitor"
 endpoint = "http://localhost:4317"
@@ -94,7 +101,7 @@ enabled = false
 - `timeout`：请求超时时间，单位秒
 - `max_retries`：连续失败多少次后触发恢复逻辑
 - `recovery_method`：恢复策略：
-  - `reload`（默认）：先临时切换 Preferred Access Technology，再切换回来；如果仍未恢复连通性，则回退到重启
+  - `reload`（默认）：先临时切换 Preferred Access Technology，再切换回来；如果监控目标仍未恢复正常，则回退到重启
   - `reboot`：跳过 reload 步骤，直接重启
 
 #### `[monitor.reboot]`
@@ -107,6 +114,13 @@ enabled = false
 - `switch_wait`：临时切换 Preferred Access Technology 后等待的秒数
 - `restore_wait`：切换回原有 Preferred Access Technology 后等待的秒数
 
+#### `[monitor.signal]`
+
+- `enabled`：是否启用信号质量监控，默认值为 `false`
+- `require_5g`：当网络退回非 5G 接入技术时是否视为异常，默认值为 `false`
+- `min_5g_rsrp`：允许的最低 5G RSRP（dBm），低于该值会触发恢复，默认值为 `-110`
+- `max_retries`：连续多少次检测到信号劣化后触发恢复逻辑，默认值为 `1`
+
 #### 默认值
 
 - `monitor.interval = 60`
@@ -118,6 +132,10 @@ enabled = false
 - `monitor.reboot.wait_after = 60`
 - `monitor.reload.switch_wait = 15`
 - `monitor.reload.restore_wait = 15`
+- `monitor.signal.enabled = false`
+- `monitor.signal.require_5g = false`
+- `monitor.signal.min_5g_rsrp = -110`
+- `monitor.signal.max_retries = 1`
 
 #### `[telemetry]`
 
@@ -296,6 +314,17 @@ enabled = false   # 暂未实现
 | `zyxel.monitor.connectivity.rtt.ms`         | Histogram | `ms`   | 连通性探测往返时延   |
 | `zyxel.monitor.connectivity.failures`       | Counter   | —    | 连通性探测失败次数   |
 
+#### 信号质量监控
+
+| 指标名称                                          | 类型    | 单位 | 属性     | 说明                         |
+| ------------------------------------------------- | ------- | ---- | -------- | ---------------------------- |
+| `zyxel.monitor.signal.degraded`                     | Counter | —    | `reason` | 信号质量劣化检测次数         |
+| `zyxel.monitor.signal.recovery.attempts`            | Counter | —    | —        | 由信号问题触发的恢复尝试次数 |
+| `zyxel.monitor.signal.recovery.successes`           | Counter | —    | —        | 由信号问题触发的恢复成功次数 |
+| `zyxel.monitor.signal.recovery.failures`            | Counter | —    | —        | 由信号问题触发的恢复失败次数 |
+
+`reason` 取值：`missing_5g`、`weak_5g_rsrp`
+
 #### 恢复：重启
 
 | 指标名称                                | 类型    | 单位 | 说明                 |
@@ -308,8 +337,8 @@ enabled = false   # 暂未实现
 | 指标名称                                    | 类型      | 单位 | 说明                             |
 | ------------------------------------------- | --------- | ---- | -------------------------------- |
 | `zyxel.monitor.reload.attempts`               | Counter   | —    | 重载恢复尝试次数                 |
-| `zyxel.monitor.reload.successes`              | Counter   | —    | 重载恢复成功次数（连通性已恢复） |
-| `zyxel.monitor.reload.failures`               | Counter   | —    | 重载恢复失败次数（连通性未恢复） |
+| `zyxel.monitor.reload.successes`              | Counter   | —    | 重载恢复成功次数（监控目标已恢复） |
+| `zyxel.monitor.reload.failures`               | Counter   | —    | 重载恢复失败次数（监控目标未恢复） |
 | `zyxel.monitor.reload.duration.seconds`       | Histogram | `s`    | 重载恢复过程总耗时               |
 
 ### 隐私保护

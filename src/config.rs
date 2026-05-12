@@ -38,6 +38,8 @@ pub struct MonitorConfig {
     pub reboot: RebootConfig,
     #[serde(default)]
     pub reload: ReloadConfig,
+    #[serde(default)]
+    pub signal: SignalConfig,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +80,29 @@ impl Default for ReloadConfig {
         Self {
             switch_wait: default_reload_switch_wait_secs(),
             restore_wait: default_reload_restore_wait_secs(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct SignalConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub require_5g: bool,
+    #[serde(default = "default_signal_min_5g_rsrp")]
+    pub min_5g_rsrp: f64,
+    #[serde(default = "default_signal_max_retries")]
+    pub max_retries: u32,
+}
+
+impl Default for SignalConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            require_5g: false,
+            min_5g_rsrp: default_signal_min_5g_rsrp(),
+            max_retries: default_signal_max_retries(),
         }
     }
 }
@@ -167,6 +192,14 @@ fn default_reload_switch_wait_secs() -> Duration {
 
 fn default_reload_restore_wait_secs() -> Duration {
     Duration::from_secs(15)
+}
+
+fn default_signal_min_5g_rsrp() -> f64 {
+    -110.0
+}
+
+fn default_signal_max_retries() -> u32 {
+    1
 }
 
 mod duration_secs {
