@@ -140,12 +140,17 @@ impl Monitor {
 
         match self.config.recovery_method {
             RecoveryMethod::Reload => {
+                let start = Instant::now();
                 match self.try_reload_recovery().await {
                     Ok(true) => return Ok(RecoveryOutcome::ConnectivityRestored),
                     Ok(false) => warn!(
                         "Reload recovery did not restore connectivity, falling back to reboot"
                     ),
                     Err(err) => {
+                        let duration = start.elapsed();
+                        if let Some(telemetry) = self.telemetry.as_ref() {
+                            telemetry.record_reload_failure(duration);
+                        }
                         warn!(error = %err, "Reload recovery failed, falling back to reboot")
                     }
                 }
@@ -181,6 +186,11 @@ impl Monitor {
     }
 
     async fn try_reload_recovery(&self) -> Result<bool> {
+        if let Some(telemetry) = self.telemetry.as_ref() {
+            telemetry.record_reload_attempt();
+        }
+        let start = Instant::now();
+
         let original = self.client.get_cellwan_band().await?;
         let original_preferred = original.preferred_access_technology.clone();
         let temporary_preferred = if original_preferred == ACCESS_TECHNOLOGY_NR5G_SA {
@@ -209,9 +219,19 @@ impl Monitor {
         self.client.set_cellwan_band(&restore_config).await?;
         sleep(self.config.reload.restore_wait).await;
 
+        let duration = start.elapsed();
+
         match self.check_connectivity().await {
-            Ok(_) => Ok(true),
+            Ok(_) => {
+                if let Some(telemetry) = self.telemetry.as_ref() {
+                    telemetry.record_reload_success(duration);
+                }
+                Ok(true)
+            }
             Err(err) => {
+                if let Some(telemetry) = self.telemetry.as_ref() {
+                    telemetry.record_reload_failure(duration);
+                }
                 warn!(
                     error = %err,
                     "Connectivity still unavailable after access technology recovery"
