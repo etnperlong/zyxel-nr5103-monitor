@@ -53,24 +53,29 @@ password = "Monitor5103"
 
 [monitor]
 interval = 15
-url = "https://www.gstatic.com/generate_204"
-timeout = 10
 max_retries = 4
 recovery_method = "reload"
 
-[monitor.reboot]
-min_interval = 3600
-wait_after = 60
-
-[monitor.reload]
-switch_wait = 15
-restore_wait = 15
+[monitor.internet]
+url = "https://www.gstatic.com/generate_204"
+timeout = 10
+# interval = 15       # optional, inherits monitor.interval when omitted
+# max_retries = 4    # optional, inherits monitor.max_retries when omitted
 
 [monitor.signal]
 enabled = true
+# interval = 15       # optional, inherits monitor.interval when omitted
 require_5g = true
 min_5g_rsrp = -110
 max_retries = 2
+
+[action.reboot]
+min_interval = 3600
+wait_after = 60
+
+[action.reload]
+switch_wait = 15
+restore_wait = 15
 
 [telemetry]
 service_name = "zyxel-nr5103-monitor"
@@ -96,46 +101,55 @@ enabled = false
 
 #### `[monitor]`
 
-- `interval`: seconds between connectivity checks
-- `url`: URL used for external connectivity checks
-- `timeout`: request timeout in seconds
-- `max_retries`: number of consecutive failures before recovery starts
+- `interval`: global default seconds between monitor checks; child monitors inherit it unless they set their own `interval`
+- `max_retries`: global default number of consecutive failures before recovery starts; child monitors inherit it unless they set their own `max_retries`
 - `recovery_method`: recovery flow to use:
   - `reload` (default): temporarily switch the preferred access technology, switch it back, then reboot if the monitored condition is still unhealthy
   - `reboot`: skip the reload step and reboot immediately
 
-#### `[monitor.reboot]`
+#### `[monitor.internet]`
 
-- `min_interval`: minimum seconds between two reboot attempts
-- `wait_after`: seconds to wait after issuing a reboot before connectivity checks resume
-
-#### `[monitor.reload]`
-
-- `switch_wait`: seconds to wait after switching the preferred access technology
-- `restore_wait`: seconds to wait after switching the preferred access technology back
+- `url`: URL used for external internet connectivity checks
+- `timeout`: request timeout in seconds
+- `interval`: optional override for internet connectivity checks; defaults to `monitor.interval`
+- `max_retries`: optional override for internet connectivity failures; defaults to `monitor.max_retries`
 
 #### `[monitor.signal]`
 
 - `enabled`: enable signal-quality monitoring, defaults to `false`
+- `interval`: optional override for signal-quality checks; defaults to `monitor.interval`
 - `require_5g`: treat fallback to non-5G access technology as degraded, defaults to `false`
 - `min_5g_rsrp`: minimum acceptable 5G RSRP in dBm before recovery starts, defaults to `-110`
-- `max_retries`: number of consecutive degraded signal checks before recovery starts, defaults to `1`
+- `max_retries`: optional number of consecutive degraded signal checks before recovery starts; defaults to `monitor.max_retries`
+
+#### `[action.reboot]`
+
+- `min_interval`: minimum seconds between two reboot attempts
+- `wait_after`: seconds to wait after issuing a reboot before connectivity checks resume
+
+#### `[action.reload]`
+
+- `switch_wait`: seconds to wait after switching the preferred access technology
+- `restore_wait`: seconds to wait after switching the preferred access technology back
 
 #### Defaults
 
 - `monitor.interval = 60`
-- `monitor.url = "http://www.gstatic.com/generate_204"`
-- `monitor.timeout = 5`
 - `monitor.max_retries = 1`
 - `monitor.recovery_method = "reload"`
-- `monitor.reboot.min_interval = 300`
-- `monitor.reboot.wait_after = 60`
-- `monitor.reload.switch_wait = 15`
-- `monitor.reload.restore_wait = 15`
+- `monitor.internet.url = "http://www.gstatic.com/generate_204"`
+- `monitor.internet.timeout = 5`
+- `monitor.internet.interval` inherits `monitor.interval`
+- `monitor.internet.max_retries` inherits `monitor.max_retries`
 - `monitor.signal.enabled = false`
+- `monitor.signal.interval` inherits `monitor.interval`
 - `monitor.signal.require_5g = false`
 - `monitor.signal.min_5g_rsrp = -110`
-- `monitor.signal.max_retries = 1`
+- `monitor.signal.max_retries` inherits `monitor.max_retries`
+- `action.reboot.min_interval = 300`
+- `action.reboot.wait_after = 60`
+- `action.reload.switch_wait = 15`
+- `action.reload.restore_wait = 15`
 
 #### `[telemetry]`
 

@@ -72,18 +72,28 @@ password = "secret"
     assert_eq!(loaded.log_level, "debug");
     assert_eq!(loaded.router.protocol, "http");
     assert_eq!(loaded.monitor.interval, Duration::from_secs(60));
-    assert_eq!(loaded.monitor.url, "http://www.gstatic.com/generate_204");
-    assert_eq!(loaded.monitor.timeout, Duration::from_secs(5));
     assert_eq!(loaded.monitor.max_retries, 1);
-    assert_eq!(loaded.monitor.reboot.min_interval, Duration::from_secs(300));
-    assert_eq!(loaded.monitor.reboot.wait_after, Duration::from_secs(60));
     assert_eq!(loaded.monitor.recovery_method, RecoveryMethod::Reload);
-    assert_eq!(loaded.monitor.reload.switch_wait, Duration::from_secs(15));
-    assert_eq!(loaded.monitor.reload.restore_wait, Duration::from_secs(15));
+    assert_eq!(
+        loaded.monitor.internet.url,
+        "http://www.gstatic.com/generate_204"
+    );
+    assert_eq!(loaded.monitor.internet.timeout, Duration::from_secs(5));
+    assert_eq!(loaded.monitor.internet.interval, None);
+    assert_eq!(loaded.monitor.internet.max_retries, None);
+    assert_eq!(loaded.monitor.internet_interval(), Duration::from_secs(60));
+    assert_eq!(loaded.monitor.internet_max_retries(), 1);
+    assert_eq!(loaded.action.reboot.min_interval, Duration::from_secs(300));
+    assert_eq!(loaded.action.reboot.wait_after, Duration::from_secs(60));
+    assert_eq!(loaded.action.reload.switch_wait, Duration::from_secs(15));
+    assert_eq!(loaded.action.reload.restore_wait, Duration::from_secs(15));
     assert!(!loaded.monitor.signal.enabled);
+    assert_eq!(loaded.monitor.signal.interval, None);
     assert!(!loaded.monitor.signal.require_5g);
     assert_eq!(loaded.monitor.signal.min_5g_rsrp, -110.0);
-    assert_eq!(loaded.monitor.signal.max_retries, 1);
+    assert_eq!(loaded.monitor.signal.max_retries, None);
+    assert_eq!(loaded.monitor.signal_interval(), Duration::from_secs(60));
+    assert_eq!(loaded.monitor.signal_max_retries(), 1);
 
     fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }
@@ -103,9 +113,12 @@ username = "monitor"
 password = "secret"
 
 [monitor]
+interval = 20
+max_retries = 5
 
 [monitor.signal]
 enabled = true
+interval = 10
 require_5g = true
 min_5g_rsrp = -105
 max_retries = 3
@@ -113,13 +126,97 @@ max_retries = 3
     )
     .expect("config file should be written");
 
-    let loaded =
-        config::load_config().expect("config should load with explicit signal monitoring");
+    let loaded = config::load_config().expect("config should load with explicit signal monitoring");
 
     assert!(loaded.monitor.signal.enabled);
+    assert_eq!(
+        loaded.monitor.signal.interval,
+        Some(Duration::from_secs(10))
+    );
     assert!(loaded.monitor.signal.require_5g);
     assert_eq!(loaded.monitor.signal.min_5g_rsrp, -105.0);
-    assert_eq!(loaded.monitor.signal.max_retries, 3);
+    assert_eq!(loaded.monitor.signal.max_retries, Some(3));
+    assert_eq!(loaded.monitor.signal_interval(), Duration::from_secs(10));
+    assert_eq!(loaded.monitor.signal_max_retries(), 3);
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_config_allows_explicit_internet_monitor_settings() {
+    let _env_guard = lock_env();
+    let temp_dir = unique_temp_dir();
+    let _dir_guard = CurrentDirGuard::change_to(&temp_dir);
+
+    fs::write(
+        temp_dir.join("config.toml"),
+        r#"
+[router]
+host = "172.16.0.1"
+username = "monitor"
+password = "secret"
+
+[monitor]
+interval = 30
+max_retries = 2
+
+[monitor.internet]
+url = "https://example.com/health"
+timeout = 7
+interval = 5
+max_retries = 4
+"#,
+    )
+    .expect("config file should be written");
+
+    let loaded =
+        config::load_config().expect("config should load with explicit internet monitoring");
+
+    assert_eq!(loaded.monitor.interval, Duration::from_secs(30));
+    assert_eq!(loaded.monitor.max_retries, 2);
+    assert_eq!(loaded.monitor.internet.url, "https://example.com/health");
+    assert_eq!(loaded.monitor.internet.timeout, Duration::from_secs(7));
+    assert_eq!(
+        loaded.monitor.internet.interval,
+        Some(Duration::from_secs(5))
+    );
+    assert_eq!(loaded.monitor.internet.max_retries, Some(4));
+    assert_eq!(loaded.monitor.internet_interval(), Duration::from_secs(5));
+    assert_eq!(loaded.monitor.internet_max_retries(), 4);
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_config_inherits_monitor_defaults_for_child_retry_and_interval() {
+    let _env_guard = lock_env();
+    let temp_dir = unique_temp_dir();
+    let _dir_guard = CurrentDirGuard::change_to(&temp_dir);
+
+    fs::write(
+        temp_dir.join("config.toml"),
+        r#"
+[router]
+host = "172.16.0.1"
+username = "monitor"
+password = "secret"
+
+[monitor]
+interval = 42
+max_retries = 6
+
+[monitor.signal]
+enabled = true
+"#,
+    )
+    .expect("config file should be written");
+
+    let loaded = config::load_config().expect("config should inherit child settings");
+
+    assert_eq!(loaded.monitor.internet_interval(), Duration::from_secs(42));
+    assert_eq!(loaded.monitor.internet_max_retries(), 6);
+    assert_eq!(loaded.monitor.signal_interval(), Duration::from_secs(42));
+    assert_eq!(loaded.monitor.signal_max_retries(), 6);
 
     fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }
@@ -168,11 +265,11 @@ password = "secret"
 [monitor]
 recovery_method = "reload"
 
-[monitor.reboot]
+[action.reboot]
 min_interval = 123
 wait_after = 45
 
-[monitor.reload]
+[action.reload]
 switch_wait = 9
 restore_wait = 11
 "#,
@@ -182,10 +279,10 @@ restore_wait = 11
     let loaded = config::load_config().expect("config should load with explicit recovery settings");
 
     assert_eq!(loaded.monitor.recovery_method, RecoveryMethod::Reload);
-    assert_eq!(loaded.monitor.reboot.min_interval, Duration::from_secs(123));
-    assert_eq!(loaded.monitor.reboot.wait_after, Duration::from_secs(45));
-    assert_eq!(loaded.monitor.reload.switch_wait, Duration::from_secs(9));
-    assert_eq!(loaded.monitor.reload.restore_wait, Duration::from_secs(11));
+    assert_eq!(loaded.action.reboot.min_interval, Duration::from_secs(123));
+    assert_eq!(loaded.action.reboot.wait_after, Duration::from_secs(45));
+    assert_eq!(loaded.action.reload.switch_wait, Duration::from_secs(9));
+    assert_eq!(loaded.action.reload.restore_wait, Duration::from_secs(11));
 
     fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }

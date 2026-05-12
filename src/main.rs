@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
                 telemetry.meter("zyxel-nr5103-monitor"),
             )
         });
-        let monitor = monitor::Monitor::new(Arc::clone(&router_client), cfg.monitor)?;
+        let monitor = monitor::Monitor::new(Arc::clone(&router_client), cfg.monitor, cfg.action)?;
         let monitor = if let Some(monitor_telemetry) = monitor_telemetry {
             monitor.with_telemetry(monitor_telemetry)
         } else {

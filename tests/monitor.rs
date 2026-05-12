@@ -13,7 +13,8 @@ use std::time::Duration;
 use zyxel_nr5103_monitor::{
     client::ZyxelClient,
     config::{
-        MonitorConfig, RebootConfig, RecoveryMethod, ReloadConfig, RouterConfig, SignalConfig,
+        ActionConfig, InternetConfig, MonitorConfig, RebootConfig, RecoveryMethod, ReloadConfig,
+        RouterConfig, SignalConfig,
     },
     monitor::Monitor,
 };
@@ -96,10 +97,20 @@ fn test_monitor_config(
 ) -> MonitorConfig {
     MonitorConfig {
         interval: Duration::from_secs(60),
-        url,
-        timeout: Duration::from_secs(2),
         max_retries,
         recovery_method,
+        internet: InternetConfig {
+            url,
+            timeout: Duration::from_secs(2),
+            interval: None,
+            max_retries: None,
+        },
+        signal: SignalConfig::default(),
+    }
+}
+
+fn test_action_config() -> ActionConfig {
+    ActionConfig {
         reboot: RebootConfig {
             min_interval: Duration::from_secs(300),
             wait_after: Duration::from_millis(10),
@@ -108,7 +119,6 @@ fn test_monitor_config(
             switch_wait: Duration::from_millis(10),
             restore_wait: Duration::from_millis(10),
         },
-        signal: SignalConfig::default(),
     }
 }
 
@@ -142,6 +152,7 @@ async fn monitor_new_builds_with_router_client_and_config() {
             1,
             RecoveryMethod::Reload,
         ),
+        test_action_config(),
     );
 
     assert!(monitor.is_ok());
@@ -176,6 +187,7 @@ async fn monitor_run_checks_connectivity_and_logs_out_on_sigint() {
     let monitor = Monitor::new(
         client,
         test_monitor_config(format!("{host}/generate_204"), 3, RecoveryMethod::Reload),
+        test_action_config(),
     )
     .unwrap();
 
@@ -236,6 +248,7 @@ async fn metrics_disabled_does_not_poll_dal() {
     let monitor = Monitor::new(
         client,
         test_monitor_config(format!("{host}/generate_204"), 3, RecoveryMethod::Reload),
+        test_action_config(),
     )
     .unwrap();
 
@@ -356,7 +369,9 @@ async fn monitor_switches_access_technology_when_signal_monitor_requires_5g() {
             "application/json",
             r#"{"result":"ZCFG_SUCCESS","Object":[{"INTF_Supported_Access_Technologies":"Auto,NR5G-SA,NR5G-NSA,LTE","INTF_Preferred_Access_Technology":"Auto","INTF_Current_Access_Technology":"LTE","INTF_Supported_Bands":"B1,B3,n78","INTF_Preferred_Bands":"Auto","INTF_Current_Band":"B1"}]}"#,
         );
-        dal_get_stream.write_all(dal_get_response.as_bytes()).unwrap();
+        dal_get_stream
+            .write_all(dal_get_response.as_bytes())
+            .unwrap();
         dal_get_stream.flush().unwrap();
 
         let (mut switch_stream, _) = listener.accept().unwrap();
@@ -429,7 +444,9 @@ async fn monitor_switches_access_technology_when_signal_monitor_requires_5g() {
 
         let (mut recovery_signal_stream, _) = listener.accept().unwrap();
         let mut recovery_signal_buffer = [0_u8; 4096];
-        let recovery_signal_read = recovery_signal_stream.read(&mut recovery_signal_buffer).unwrap();
+        let recovery_signal_read = recovery_signal_stream
+            .read(&mut recovery_signal_buffer)
+            .unwrap();
         let recovery_signal_request =
             String::from_utf8_lossy(&recovery_signal_buffer[..recovery_signal_read]).to_string();
         request_log.lock().unwrap().push(recovery_signal_request);
@@ -475,12 +492,13 @@ async fn monitor_switches_access_technology_when_signal_monitor_requires_5g() {
     );
     config.signal = SignalConfig {
         enabled: true,
+        interval: None,
         require_5g: true,
         min_5g_rsrp: -110.0,
-        max_retries: 1,
+        max_retries: Some(1),
     };
 
-    let monitor = Monitor::new(Arc::clone(&client), config).unwrap();
+    let monitor = Monitor::new(Arc::clone(&client), config, test_action_config()).unwrap();
 
     let monitor_task = tokio::spawn(async move { monitor.run().await });
 
@@ -499,9 +517,9 @@ async fn monitor_switches_access_technology_when_signal_monitor_requires_5g() {
 
     let recorded_requests = requests.lock().unwrap().clone();
     assert!(
-        recorded_requests
-            .iter()
-            .any(|request| request.starts_with("GET /cgi-bin/DAL?oid=cellwan_status&sessionkey=77 "))
+        recorded_requests.iter().any(
+            |request| request.starts_with("GET /cgi-bin/DAL?oid=cellwan_status&sessionkey=77 ")
+        )
     );
     assert!(
         recorded_requests
@@ -648,6 +666,7 @@ async fn monitor_reauthenticates_and_reboots_after_connectivity_failure_when_con
     let monitor = Monitor::new(
         Arc::clone(&client),
         test_monitor_config(format!("{host}/generate_204"), 1, RecoveryMethod::Reboot),
+        test_action_config(),
     )
     .unwrap();
 
@@ -891,6 +910,7 @@ async fn monitor_switches_access_technology_and_skips_reboot_when_connectivity_r
     let monitor = Monitor::new(
         Arc::clone(&client),
         test_monitor_config(format!("{host}/generate_204"), 1, RecoveryMethod::Reload),
+        test_action_config(),
     )
     .unwrap();
 
@@ -1133,6 +1153,7 @@ async fn monitor_reboots_when_access_technology_recovery_does_not_restore_connec
     let monitor = Monitor::new(
         Arc::clone(&client),
         test_monitor_config(format!("{host}/generate_204"), 1, RecoveryMethod::Reload),
+        test_action_config(),
     )
     .unwrap();
 

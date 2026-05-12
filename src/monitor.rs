@@ -5,7 +5,7 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 use crate::client::{ZyxelClient, dal::DalOid};
-use crate::config::{MonitorConfig, RecoveryMethod, SignalConfig};
+use crate::config::{ActionConfig, MonitorConfig, RecoveryMethod, SignalConfig};
 use crate::telemetry::{
     metrics::TelemetryCollector,
     zyxel::{CellWanStatusObject, sanitize_access_technology},
@@ -57,13 +57,18 @@ impl SignalQualityIssue {
 pub struct Monitor {
     client: Arc<ZyxelClient>,
     config: MonitorConfig,
+    action: ActionConfig,
     check_client: reqwest::Client,
     telemetry: Option<TelemetryCollector>,
 }
 
 impl Monitor {
-    pub fn new(client: Arc<ZyxelClient>, config: MonitorConfig) -> Result<Self> {
-        Self::build(client, config, None)
+    pub fn new(
+        client: Arc<ZyxelClient>,
+        config: MonitorConfig,
+        action: ActionConfig,
+    ) -> Result<Self> {
+        Self::build(client, config, action, None)
     }
 
     pub fn with_telemetry(mut self, telemetry: TelemetryCollector) -> Self {
@@ -74,16 +79,18 @@ impl Monitor {
     fn build(
         client: Arc<ZyxelClient>,
         config: MonitorConfig,
+        action: ActionConfig,
         telemetry: Option<TelemetryCollector>,
     ) -> Result<Self> {
         let check_client = reqwest::ClientBuilder::new()
             .danger_accept_invalid_certs(true)
-            .timeout(config.timeout)
+            .timeout(config.internet.timeout)
             .build()?;
 
         Ok(Self {
             client,
             config,
+            action,
             check_client,
             telemetry,
         })
@@ -94,11 +101,12 @@ impl Monitor {
         let mut failure_count: u32 = 0;
         let mut signal_failure_count: u32 = 0;
         let mut last_reboot: Option<Instant> = None;
-        let mut interval = tokio::time::interval(self.config.interval);
+        let mut internet_interval = tokio::time::interval(self.config.internet_interval());
+        let mut signal_interval = tokio::time::interval(self.config.signal_interval());
 
         loop {
             tokio::select! {
-                _ = interval.tick() => {
+                _ = internet_interval.tick() => {
                     match self.check_connectivity().await {
                         Ok(rtt) => {
                             debug!(rtt_ms = rtt.as_millis(), "Network OK");
@@ -106,70 +114,6 @@ impl Monitor {
                                 telemetry.record_connectivity_success(rtt);
                             }
                             failure_count = 0;
-
-                            match self.check_signal_quality().await {
-                                Ok(None) => {
-                                    signal_failure_count = 0;
-                                }
-                                Ok(Some(issue)) => {
-                                    if let Some(telemetry) = self.telemetry.as_ref() {
-                                        telemetry.record_signal_degraded(issue.metric_reason());
-                                    }
-                                    signal_failure_count += 1;
-                                    warn!(
-                                        signal_failure_count,
-                                        max_retries = self.config.signal.max_retries,
-                                        issue = %issue.summary(),
-                                        "Signal quality check failed"
-                                    );
-
-                                    if signal_failure_count >= self.config.signal.max_retries {
-                                        if let Some(telemetry) = self.telemetry.as_ref() {
-                                            telemetry.record_signal_recovery_attempt();
-                                        }
-                                        let reboot_allowed = last_reboot
-                                            .map(|instant| {
-                                                instant.elapsed() >= self.config.reboot.min_interval
-                                            })
-                                            .unwrap_or(true);
-
-                                        info!(
-                                            issue = %issue.summary(),
-                                            "Triggering connection recovery after degraded signal"
-                                        );
-
-                                        match self
-                                            .recovery(RecoveryTrigger::SignalQuality, reboot_allowed)
-                                            .await
-                                        {
-                                            Ok(RecoveryOutcome::ConnectivityRestored) => {
-                                                if let Some(telemetry) = self.telemetry.as_ref() {
-                                                    telemetry.record_signal_recovery_success();
-                                                }
-                                                signal_failure_count = 0;
-                                                failure_count = 0;
-                                            }
-                                            Ok(RecoveryOutcome::Rebooted { rebooted_at }) => {
-                                                if let Some(telemetry) = self.telemetry.as_ref() {
-                                                    telemetry.record_signal_recovery_success();
-                                                }
-                                                last_reboot = Some(rebooted_at);
-                                                signal_failure_count = 0;
-                                                failure_count = 0;
-                                            }
-                                            Err(err) => {
-                                                if let Some(telemetry) = self.telemetry.as_ref() {
-                                                    telemetry.record_signal_recovery_failure();
-                                                }
-                                                error!(error = %err, "Signal recovery failed");
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(err) => {
-                                    warn!(error = %err, "Signal quality check failed");
-                                }
-                            }
                         }
                         Err(_err) => {
                             if let Some(telemetry) = self.telemetry.as_ref() {
@@ -179,13 +123,13 @@ impl Monitor {
                             failure_count += 1;
                             warn!(
                                 failure_count,
-                                max_retries = self.config.max_retries,
+                                max_retries = self.config.internet_max_retries(),
                                 "Connectivity check failed"
                             );
 
-                            if failure_count >= self.config.max_retries {
+                            if failure_count >= self.config.internet_max_retries() {
                                 let reboot_allowed = last_reboot
-                                    .map(|instant| instant.elapsed() >= self.config.reboot.min_interval)
+                                    .map(|instant| instant.elapsed() >= self.action.reboot.min_interval)
                                     .unwrap_or(true);
 
                                 info!("Triggering connection recovery after {} failures", failure_count);
@@ -214,6 +158,68 @@ impl Monitor {
                         warn!(error = %error, "Telemetry collection failed");
                     }
                 }
+                _ = signal_interval.tick(), if self.config.signal.enabled => {
+                    match self.check_signal_quality().await {
+                        Ok(None) => {
+                            signal_failure_count = 0;
+                        }
+                        Ok(Some(issue)) => {
+                            if let Some(telemetry) = self.telemetry.as_ref() {
+                                telemetry.record_signal_degraded(issue.metric_reason());
+                            }
+                            signal_failure_count += 1;
+                            warn!(
+                                signal_failure_count,
+                                max_retries = self.config.signal_max_retries(),
+                                issue = %issue.summary(),
+                                "Signal quality check failed"
+                            );
+
+                            if signal_failure_count >= self.config.signal_max_retries() {
+                                if let Some(telemetry) = self.telemetry.as_ref() {
+                                    telemetry.record_signal_recovery_attempt();
+                                }
+                                let reboot_allowed = last_reboot
+                                    .map(|instant| {
+                                        instant.elapsed() >= self.action.reboot.min_interval
+                                    })
+                                    .unwrap_or(true);
+
+                                info!(
+                                    issue = %issue.summary(),
+                                    "Triggering connection recovery after degraded signal"
+                                );
+
+                                match self.recovery(RecoveryTrigger::SignalQuality, reboot_allowed).await {
+                                    Ok(RecoveryOutcome::ConnectivityRestored) => {
+                                        if let Some(telemetry) = self.telemetry.as_ref() {
+                                            telemetry.record_signal_recovery_success();
+                                        }
+                                        signal_failure_count = 0;
+                                        failure_count = 0;
+                                    }
+                                    Ok(RecoveryOutcome::Rebooted { rebooted_at }) => {
+                                        if let Some(telemetry) = self.telemetry.as_ref() {
+                                            telemetry.record_signal_recovery_success();
+                                        }
+                                        last_reboot = Some(rebooted_at);
+                                        signal_failure_count = 0;
+                                        failure_count = 0;
+                                    }
+                                    Err(err) => {
+                                        if let Some(telemetry) = self.telemetry.as_ref() {
+                                            telemetry.record_signal_recovery_failure();
+                                        }
+                                        error!(error = %err, "Signal recovery failed");
+                                    }
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!(error = %err, "Signal quality check failed");
+                        }
+                    }
+                }
                 _ = tokio::signal::ctrl_c() => {
                     info!("Shutdown signal received");
                     break;
@@ -231,7 +237,11 @@ impl Monitor {
 
     async fn check_connectivity(&self) -> Result<Duration> {
         let start = Instant::now();
-        let response = self.check_client.get(&self.config.url).send().await?;
+        let response = self
+            .check_client
+            .get(&self.config.internet.url)
+            .send()
+            .await?;
         let status = response.status();
 
         if !status.is_success() && status.as_u16() != 204 {
@@ -256,7 +266,9 @@ impl Monitor {
                         trigger = ?trigger,
                         "Reload recovery did not restore the monitored condition, falling back to reboot"
                     ),
-                    Err(err) => warn!(error = %err, "Reload recovery failed, falling back to reboot"),
+                    Err(err) => {
+                        warn!(error = %err, "Reload recovery failed, falling back to reboot")
+                    }
                 }
 
                 if !reboot_allowed {
@@ -306,9 +318,7 @@ impl Monitor {
                 debug!(error = %initial_error, "Refreshing router session before retrying signal check");
                 self.check_auth().await?;
                 self.client.get_cellwan_status().await.with_context(|| {
-                    format!(
-                        "Failed to fetch cellwan_status after session refresh: {initial_error}"
-                    )
+                    format!("Failed to fetch cellwan_status after session refresh: {initial_error}")
                 })
             }
         }
@@ -336,7 +346,7 @@ impl Monitor {
             "Temporarily switching preferred access technology"
         );
         self.client.set_cellwan_band(&switch_config).await?;
-        sleep(self.config.reload.switch_wait).await;
+        sleep(self.action.reload.switch_wait).await;
 
         let mut restore_config = original;
         restore_config.preferred_access_technology = original_preferred;
@@ -346,7 +356,7 @@ impl Monitor {
             "Restoring preferred access technology"
         );
         self.client.set_cellwan_band(&restore_config).await?;
-        sleep(self.config.reload.restore_wait).await;
+        sleep(self.action.reload.restore_wait).await;
 
         let duration = start.elapsed();
 
@@ -402,12 +412,12 @@ impl Monitor {
             telemetry.record_reboot_success();
         }
 
-        if !self.config.reboot.wait_after.is_zero() {
+        if !self.action.reboot.wait_after.is_zero() {
             info!(
-                wait_after_secs = self.config.reboot.wait_after.as_secs(),
+                wait_after_secs = self.action.reboot.wait_after.as_secs(),
                 "Waiting after reboot before resuming connectivity checks"
             );
-            sleep(self.config.reboot.wait_after).await;
+            sleep(self.action.reboot.wait_after).await;
         }
 
         Ok(RecoveryOutcome::Rebooted { rebooted_at })
@@ -462,17 +472,15 @@ fn current_5g_rsrp(status: &CellWanStatusObject, access_technology: Option<&str>
 #[cfg(test)]
 mod tests {
     use super::{SignalQualityIssue, signal_quality_issue};
-    use crate::{
-        config::SignalConfig,
-        telemetry::zyxel::CellWanStatusObject,
-    };
+    use crate::{config::SignalConfig, telemetry::zyxel::CellWanStatusObject};
 
     fn signal_config() -> SignalConfig {
         SignalConfig {
             enabled: true,
+            interval: None,
             require_5g: true,
             min_5g_rsrp: -110.0,
-            max_retries: 1,
+            max_retries: Some(1),
         }
     }
 

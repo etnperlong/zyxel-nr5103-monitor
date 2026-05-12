@@ -10,6 +10,8 @@ pub struct AppConfig {
     pub router: RouterConfig,
     pub monitor: MonitorConfig,
     #[serde(default)]
+    pub action: ActionConfig,
+    #[serde(default)]
     pub telemetry: TelemetryConfig,
 }
 
@@ -26,20 +28,63 @@ pub struct RouterConfig {
 pub struct MonitorConfig {
     #[serde(default = "default_interval_secs", with = "duration_secs")]
     pub interval: Duration,
-    #[serde(default = "default_url")]
-    pub url: String,
-    #[serde(default = "default_timeout_secs", with = "duration_secs")]
-    pub timeout: Duration,
     #[serde(default = "default_max_retries")]
     pub max_retries: u32,
     #[serde(default = "default_recovery_method")]
     pub recovery_method: RecoveryMethod,
     #[serde(default)]
+    pub internet: InternetConfig,
+    #[serde(default)]
+    pub signal: SignalConfig,
+}
+
+impl MonitorConfig {
+    pub fn internet_interval(&self) -> Duration {
+        self.internet.interval.unwrap_or(self.interval)
+    }
+
+    pub fn internet_max_retries(&self) -> u32 {
+        self.internet.max_retries.unwrap_or(self.max_retries)
+    }
+
+    pub fn signal_interval(&self) -> Duration {
+        self.signal.interval.unwrap_or(self.interval)
+    }
+
+    pub fn signal_max_retries(&self) -> u32 {
+        self.signal.max_retries.unwrap_or(self.max_retries)
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct InternetConfig {
+    #[serde(default = "default_url")]
+    pub url: String,
+    #[serde(default = "default_timeout_secs", with = "duration_secs")]
+    pub timeout: Duration,
+    #[serde(default, with = "optional_duration_secs")]
+    pub interval: Option<Duration>,
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+}
+
+impl Default for InternetConfig {
+    fn default() -> Self {
+        Self {
+            url: default_url(),
+            timeout: default_timeout_secs(),
+            interval: None,
+            max_retries: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct ActionConfig {
+    #[serde(default)]
     pub reboot: RebootConfig,
     #[serde(default)]
     pub reload: ReloadConfig,
-    #[serde(default)]
-    pub signal: SignalConfig,
 }
 
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -88,21 +133,24 @@ impl Default for ReloadConfig {
 pub struct SignalConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default, with = "optional_duration_secs")]
+    pub interval: Option<Duration>,
     #[serde(default)]
     pub require_5g: bool,
     #[serde(default = "default_signal_min_5g_rsrp")]
     pub min_5g_rsrp: f64,
-    #[serde(default = "default_signal_max_retries")]
-    pub max_retries: u32,
+    #[serde(default)]
+    pub max_retries: Option<u32>,
 }
 
 impl Default for SignalConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            interval: None,
             require_5g: false,
             min_5g_rsrp: default_signal_min_5g_rsrp(),
-            max_retries: default_signal_max_retries(),
+            max_retries: None,
         }
     }
 }
@@ -198,10 +246,6 @@ fn default_signal_min_5g_rsrp() -> f64 {
     -110.0
 }
 
-fn default_signal_max_retries() -> u32 {
-    1
-}
-
 mod duration_secs {
     use serde::{Deserialize, Deserializer};
     use std::time::Duration;
@@ -209,6 +253,16 @@ mod duration_secs {
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
         let secs = u64::deserialize(d)?;
         Ok(Duration::from_secs(secs))
+    }
+}
+
+mod optional_duration_secs {
+    use serde::{Deserialize, Deserializer};
+    use std::time::Duration;
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
+        let secs = Option::<u64>::deserialize(d)?;
+        Ok(secs.map(Duration::from_secs))
     }
 }
 

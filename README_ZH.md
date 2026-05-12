@@ -53,24 +53,29 @@ password = "Monitor5103"
 
 [monitor]
 interval = 15
-url = "https://www.gstatic.com/generate_204"
-timeout = 10
 max_retries = 4
 recovery_method = "reload"
 
-[monitor.reboot]
-min_interval = 3600
-wait_after = 60
-
-[monitor.reload]
-switch_wait = 15
-restore_wait = 15
+[monitor.internet]
+url = "https://www.gstatic.com/generate_204"
+timeout = 10
+# interval = 15       # 可选；省略时继承 monitor.interval
+# max_retries = 4    # 可选；省略时继承 monitor.max_retries
 
 [monitor.signal]
 enabled = true
+# interval = 15       # 可选；省略时继承 monitor.interval
 require_5g = true
 min_5g_rsrp = -110
 max_retries = 2
+
+[action.reboot]
+min_interval = 3600
+wait_after = 60
+
+[action.reload]
+switch_wait = 15
+restore_wait = 15
 
 [telemetry]
 service_name = "zyxel-nr5103-monitor"
@@ -96,46 +101,55 @@ enabled = false
 
 #### `[monitor]`
 
-- `interval`：连通性检查间隔，单位秒
-- `url`：用于检测外网连通性的 URL
-- `timeout`：请求超时时间，单位秒
-- `max_retries`：连续失败多少次后触发恢复逻辑
+- `interval`：全局默认监控间隔，单位秒；子监控项未设置 `interval` 时继承该值
+- `max_retries`：全局默认连续失败次数阈值；子监控项未设置 `max_retries` 时继承该值
 - `recovery_method`：恢复策略：
   - `reload`（默认）：先临时切换 Preferred Access Technology，再切换回来；如果监控目标仍未恢复正常，则回退到重启
   - `reboot`：跳过 reload 步骤，直接重启
 
-#### `[monitor.reboot]`
+#### `[monitor.internet]`
 
-- `min_interval`：两次重启之间的最小间隔，单位秒
-- `wait_after`：执行重启后等待多少秒，再恢复连通性检查
-
-#### `[monitor.reload]`
-
-- `switch_wait`：临时切换 Preferred Access Technology 后等待的秒数
-- `restore_wait`：切换回原有 Preferred Access Technology 后等待的秒数
+- `url`：用于检查公网访问能力的 URL
+- `timeout`：请求超时时间，单位秒
+- `interval`：可选的公网访问检查间隔；默认继承 `monitor.interval`
+- `max_retries`：可选的公网访问连续失败次数阈值；默认继承 `monitor.max_retries`
 
 #### `[monitor.signal]`
 
 - `enabled`：是否启用信号质量监控，默认值为 `false`
+- `interval`：可选的信号质量检查间隔；默认继承 `monitor.interval`
 - `require_5g`：当网络退回非 5G 接入技术时是否视为异常，默认值为 `false`
 - `min_5g_rsrp`：允许的最低 5G RSRP（dBm），低于该值会触发恢复，默认值为 `-110`
-- `max_retries`：连续多少次检测到信号劣化后触发恢复逻辑，默认值为 `1`
+- `max_retries`：可选的信号劣化连续失败次数阈值；默认继承 `monitor.max_retries`
+
+#### `[action.reboot]`
+
+- `min_interval`：两次重启之间的最小间隔，单位秒
+- `wait_after`：执行重启后等待多少秒，再恢复连通性检查
+
+#### `[action.reload]`
+
+- `switch_wait`：临时切换 Preferred Access Technology 后等待的秒数
+- `restore_wait`：切换回原有 Preferred Access Technology 后等待的秒数
 
 #### 默认值
 
 - `monitor.interval = 60`
-- `monitor.url = "http://www.gstatic.com/generate_204"`
-- `monitor.timeout = 5`
 - `monitor.max_retries = 1`
 - `monitor.recovery_method = "reload"`
-- `monitor.reboot.min_interval = 300`
-- `monitor.reboot.wait_after = 60`
-- `monitor.reload.switch_wait = 15`
-- `monitor.reload.restore_wait = 15`
+- `monitor.internet.url = "http://www.gstatic.com/generate_204"`
+- `monitor.internet.timeout = 5`
+- `monitor.internet.interval` 继承 `monitor.interval`
+- `monitor.internet.max_retries` 继承 `monitor.max_retries`
 - `monitor.signal.enabled = false`
+- `monitor.signal.interval` 继承 `monitor.interval`
 - `monitor.signal.require_5g = false`
 - `monitor.signal.min_5g_rsrp = -110`
-- `monitor.signal.max_retries = 1`
+- `monitor.signal.max_retries` 继承 `monitor.max_retries`
+- `action.reboot.min_interval = 300`
+- `action.reboot.wait_after = 60`
+- `action.reload.switch_wait = 15`
+- `action.reload.restore_wait = 15`
 
 #### `[telemetry]`
 
