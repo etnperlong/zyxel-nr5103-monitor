@@ -22,6 +22,12 @@ use zyxel_nr5103_monitor::{
 type Aes256CbcEnc = Encryptor<Aes256>;
 type Aes256CbcDec = Decryptor<Aes256>;
 
+static MONITOR_SIGINT_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn lock_monitor_sigint_tests() -> tokio::sync::MutexGuard<'static, ()> {
+    MONITOR_SIGINT_TEST_LOCK.lock().await
+}
+
 fn spawn_http_server(responses: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -160,6 +166,8 @@ async fn monitor_new_builds_with_router_client_and_config() {
 
 #[tokio::test]
 async fn monitor_run_checks_connectivity_and_logs_out_on_sigint() {
+    let _guard = lock_monitor_sigint_tests().await;
+
     let rsa_response = http_response(
         "200 OK",
         "application/json",
@@ -221,6 +229,8 @@ async fn monitor_run_checks_connectivity_and_logs_out_on_sigint() {
 
 #[tokio::test]
 async fn metrics_disabled_does_not_poll_dal() {
+    let _guard = lock_monitor_sigint_tests().await;
+
     let rsa_response = http_response(
         "200 OK",
         "application/json",
@@ -277,6 +287,8 @@ async fn metrics_disabled_does_not_poll_dal() {
 
 #[tokio::test]
 async fn monitor_switches_access_technology_when_signal_monitor_requires_5g() {
+    let _guard = lock_monitor_sigint_tests().await;
+
     let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
@@ -535,6 +547,8 @@ async fn monitor_switches_access_technology_when_signal_monitor_requires_5g() {
 
 #[tokio::test]
 async fn monitor_reauthenticates_and_reboots_after_connectivity_failure_when_configured() {
+    let _guard = lock_monitor_sigint_tests().await;
+
     let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
@@ -717,6 +731,8 @@ async fn monitor_reauthenticates_and_reboots_after_connectivity_failure_when_con
 
 #[tokio::test]
 async fn monitor_switches_access_technology_and_skips_reboot_when_connectivity_recovers() {
+    let _guard = lock_monitor_sigint_tests().await;
+
     let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
@@ -951,6 +967,8 @@ async fn monitor_switches_access_technology_and_skips_reboot_when_connectivity_r
 
 #[tokio::test]
 async fn monitor_reboots_when_access_technology_recovery_does_not_restore_connectivity() {
+    let _guard = lock_monitor_sigint_tests().await;
+
     let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()

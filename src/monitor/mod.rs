@@ -1,18 +1,46 @@
-use anyhow::{Context, Result};
+mod auth;
+mod internet;
+mod signal;
+
+use anyhow::Result;
+use std::future::Future;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-use crate::client::{ZyxelClient, dal::DalOid};
-use crate::config::{ActionConfig, MonitorConfig, RecoveryMethod, SignalConfig};
-use crate::telemetry::{
-    metrics::TelemetryCollector,
-    zyxel::{CellWanStatusObject, sanitize_access_technology},
-};
+use crate::client::ZyxelClient;
+use crate::config::{ActionConfig, MonitorConfig, RecoveryMethod};
+use crate::telemetry::metrics::TelemetryCollector;
+
+use self::auth::ensure_authenticated;
+use self::internet::InternetMonitor;
+use self::signal::SignalMonitor;
 
 const ACCESS_TECHNOLOGY_AUTO: &str = "Auto";
 const ACCESS_TECHNOLOGY_NR5G_SA: &str = "NR5G-SA";
+
+#[derive(Debug)]
+enum CheckResult<T, E> {
+    Healthy(T),
+    Degraded(E),
+}
+
+trait QualityMonitor {
+    type Success;
+    type Issue;
+
+    fn interval(&self) -> std::time::Duration;
+
+    fn max_retries(&self) -> u32;
+
+    fn enabled(&self) -> bool {
+        true
+    }
+
+    fn check(&self)
+    -> impl Future<Output = Result<CheckResult<Self::Success, Self::Issue>>> + Send;
+}
 
 enum RecoveryOutcome {
     ConnectivityRestored,
@@ -25,40 +53,12 @@ enum RecoveryTrigger {
     SignalQuality,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum SignalQualityIssue {
-    Missing5g { access_technology: Option<String> },
-    Weak5gRsrp { rsrp: f64, threshold: f64 },
-}
-
-impl SignalQualityIssue {
-    fn metric_reason(&self) -> &'static str {
-        match self {
-            Self::Missing5g { .. } => "missing_5g",
-            Self::Weak5gRsrp { .. } => "weak_5g_rsrp",
-        }
-    }
-
-    fn summary(&self) -> String {
-        match self {
-            Self::Missing5g { access_technology } => match access_technology.as_deref() {
-                Some(access_technology) => {
-                    format!("5G unavailable, current access technology is {access_technology}")
-                }
-                None => "5G unavailable, current access technology is unknown".to_string(),
-            },
-            Self::Weak5gRsrp { rsrp, threshold } => {
-                format!("5G RSRP {rsrp} dBm is below threshold {threshold} dBm")
-            }
-        }
-    }
-}
-
 pub struct Monitor {
     client: Arc<ZyxelClient>,
-    config: MonitorConfig,
+    recovery_method: RecoveryMethod,
     action: ActionConfig,
-    check_client: reqwest::Client,
+    internet: InternetMonitor,
+    signal: SignalMonitor,
     telemetry: Option<TelemetryCollector>,
 }
 
@@ -82,16 +82,27 @@ impl Monitor {
         action: ActionConfig,
         telemetry: Option<TelemetryCollector>,
     ) -> Result<Self> {
-        let check_client = reqwest::ClientBuilder::new()
-            .danger_accept_invalid_certs(true)
-            .timeout(config.internet.timeout)
-            .build()?;
+        let internet_interval = config.internet_interval();
+        let internet_max_retries = config.internet_max_retries();
+        let signal_interval = config.signal_interval();
+        let signal_max_retries = config.signal_max_retries();
+        let recovery_method = config.recovery_method;
+
+        let internet =
+            InternetMonitor::new(config.internet, internet_interval, internet_max_retries)?;
+        let signal = SignalMonitor::new(
+            Arc::clone(&client),
+            config.signal,
+            signal_interval,
+            signal_max_retries,
+        );
 
         Ok(Self {
             client,
-            config,
+            recovery_method,
             action,
-            check_client,
+            internet,
+            signal,
             telemetry,
         })
     }
@@ -101,21 +112,23 @@ impl Monitor {
         let mut failure_count: u32 = 0;
         let mut signal_failure_count: u32 = 0;
         let mut last_reboot: Option<Instant> = None;
-        let mut internet_interval = tokio::time::interval(self.config.internet_interval());
-        let mut signal_interval = tokio::time::interval(self.config.signal_interval());
+        let mut internet_interval = tokio::time::interval(self.internet.interval());
+        let mut signal_interval = tokio::time::interval(self.signal.interval());
 
         loop {
             tokio::select! {
+                biased;
+
                 _ = internet_interval.tick() => {
-                    match self.check_connectivity().await {
-                        Ok(rtt) => {
+                    match self.internet.check().await {
+                        Ok(CheckResult::Healthy(rtt)) => {
                             debug!(rtt_ms = rtt.as_millis(), "Network OK");
                             if let Some(telemetry) = self.telemetry.as_ref() {
                                 telemetry.record_connectivity_success(rtt);
                             }
                             failure_count = 0;
                         }
-                        Err(_err) => {
+                        Ok(CheckResult::Degraded(issue)) => {
                             if let Some(telemetry) = self.telemetry.as_ref() {
                                 telemetry.record_connectivity_failure();
                             }
@@ -123,11 +136,12 @@ impl Monitor {
                             failure_count += 1;
                             warn!(
                                 failure_count,
-                                max_retries = self.config.internet_max_retries(),
+                                max_retries = self.internet.max_retries(),
+                                issue = %issue.summary(),
                                 "Connectivity check failed"
                             );
 
-                            if failure_count >= self.config.internet_max_retries() {
+                            if failure_count >= self.internet.max_retries() {
                                 let reboot_allowed = last_reboot
                                     .map(|instant| instant.elapsed() >= self.action.reboot.min_interval)
                                     .unwrap_or(true);
@@ -150,6 +164,9 @@ impl Monitor {
                                 }
                             }
                         }
+                        Err(err) => {
+                            warn!(error = %err, "Connectivity monitor failed");
+                        }
                     }
 
                     if let Some(telemetry) = self.telemetry.as_mut()
@@ -158,24 +175,24 @@ impl Monitor {
                         warn!(error = %error, "Telemetry collection failed");
                     }
                 }
-                _ = signal_interval.tick(), if self.config.signal.enabled => {
-                    match self.check_signal_quality().await {
-                        Ok(None) => {
+                _ = signal_interval.tick(), if self.signal.enabled() => {
+                    match self.signal.check().await {
+                        Ok(CheckResult::Healthy(())) => {
                             signal_failure_count = 0;
                         }
-                        Ok(Some(issue)) => {
+                        Ok(CheckResult::Degraded(issue)) => {
                             if let Some(telemetry) = self.telemetry.as_ref() {
                                 telemetry.record_signal_degraded(issue.metric_reason());
                             }
                             signal_failure_count += 1;
                             warn!(
                                 signal_failure_count,
-                                max_retries = self.config.signal_max_retries(),
+                                max_retries = self.signal.max_retries(),
                                 issue = %issue.summary(),
                                 "Signal quality check failed"
                             );
 
-                            if signal_failure_count >= self.config.signal_max_retries() {
+                            if signal_failure_count >= self.signal.max_retries() {
                                 if let Some(telemetry) = self.telemetry.as_ref() {
                                     telemetry.record_signal_recovery_attempt();
                                 }
@@ -235,30 +252,14 @@ impl Monitor {
         Ok(())
     }
 
-    async fn check_connectivity(&self) -> Result<Duration> {
-        let start = Instant::now();
-        let response = self
-            .check_client
-            .get(&self.config.internet.url)
-            .send()
-            .await?;
-        let status = response.status();
-
-        if !status.is_success() && status.as_u16() != 204 {
-            anyhow::bail!("Unexpected status: {status}");
-        }
-
-        Ok(start.elapsed())
-    }
-
     async fn recovery(
         &self,
         trigger: RecoveryTrigger,
         reboot_allowed: bool,
     ) -> Result<RecoveryOutcome> {
-        self.check_auth().await?;
+        ensure_authenticated(&self.client).await?;
 
-        match self.config.recovery_method {
+        match self.recovery_method {
             RecoveryMethod::Reload => {
                 match self.try_reload_recovery(trigger).await {
                     Ok(true) => return Ok(RecoveryOutcome::ConnectivityRestored),
@@ -283,43 +284,6 @@ impl Monitor {
                 }
 
                 self.reboot_router().await
-            }
-        }
-    }
-
-    async fn check_auth(&self) -> Result<()> {
-        if let Err(_err) = self
-            .client
-            .get_dal::<serde_json::Value>(DalOid::Status)
-            .await
-        {
-            warn!("Session check failed, re-logging in");
-            let _ = self.client.logout().await;
-            self.client.login().await?;
-        }
-
-        Ok(())
-    }
-
-    async fn check_signal_quality(&self) -> Result<Option<SignalQualityIssue>> {
-        if !self.config.signal.enabled {
-            return Ok(None);
-        }
-
-        let status = self.fetch_cellwan_status().await?;
-
-        Ok(signal_quality_issue(&status, &self.config.signal))
-    }
-
-    async fn fetch_cellwan_status(&self) -> Result<CellWanStatusObject> {
-        match self.client.get_cellwan_status().await {
-            Ok(status) => Ok(status),
-            Err(initial_error) => {
-                debug!(error = %initial_error, "Refreshing router session before retrying signal check");
-                self.check_auth().await?;
-                self.client.get_cellwan_status().await.with_context(|| {
-                    format!("Failed to fetch cellwan_status after session refresh: {initial_error}")
-                })
             }
         }
     }
@@ -388,13 +352,19 @@ impl Monitor {
 
     async fn recovery_target_restored(&self, trigger: RecoveryTrigger) -> Result<bool> {
         match trigger {
-            RecoveryTrigger::Connectivity => Ok(self.check_connectivity().await.is_ok()),
+            RecoveryTrigger::Connectivity => Ok(matches!(
+                self.internet.check().await?,
+                CheckResult::Healthy(_)
+            )),
             RecoveryTrigger::SignalQuality => {
-                if self.check_connectivity().await.is_err() {
+                if !matches!(self.internet.check().await?, CheckResult::Healthy(_)) {
                     return Ok(false);
                 }
 
-                Ok(self.check_signal_quality().await?.is_none())
+                Ok(matches!(
+                    self.signal.check().await?,
+                    CheckResult::Healthy(())
+                ))
             }
         }
     }
@@ -421,118 +391,5 @@ impl Monitor {
         }
 
         Ok(RecoveryOutcome::Rebooted { rebooted_at })
-    }
-}
-
-fn signal_quality_issue(
-    status: &CellWanStatusObject,
-    config: &SignalConfig,
-) -> Option<SignalQualityIssue> {
-    if !config.enabled {
-        return None;
-    }
-
-    let access_technology = status
-        .intf_current_access_technology
-        .as_deref()
-        .and_then(sanitize_access_technology);
-
-    if config.require_5g && !uses_5g(access_technology.as_deref()) {
-        return Some(SignalQualityIssue::Missing5g { access_technology });
-    }
-
-    let rsrp = current_5g_rsrp(status, access_technology.as_deref());
-    if let Some(rsrp) = rsrp
-        && rsrp < config.min_5g_rsrp
-    {
-        return Some(SignalQualityIssue::Weak5gRsrp {
-            rsrp,
-            threshold: config.min_5g_rsrp,
-        });
-    }
-
-    None
-}
-
-fn uses_5g(access_technology: Option<&str>) -> bool {
-    matches!(
-        access_technology,
-        Some("nr5g") | Some("nr5g_nsa") | Some("nr5g_sa")
-    )
-}
-
-fn current_5g_rsrp(status: &CellWanStatusObject, access_technology: Option<&str>) -> Option<f64> {
-    if !uses_5g(access_technology) {
-        return None;
-    }
-
-    status.nsa_rsrp.or(status.intf_rsrp)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{SignalQualityIssue, signal_quality_issue};
-    use crate::{config::SignalConfig, telemetry::zyxel::CellWanStatusObject};
-
-    fn signal_config() -> SignalConfig {
-        SignalConfig {
-            enabled: true,
-            interval: None,
-            require_5g: true,
-            min_5g_rsrp: -110.0,
-            max_retries: Some(1),
-        }
-    }
-
-    #[test]
-    fn signal_quality_detects_missing_5g_when_required() {
-        let issue = signal_quality_issue(
-            &CellWanStatusObject {
-                intf_current_access_technology: Some("LTE".to_string()),
-                ..Default::default()
-            },
-            &signal_config(),
-        );
-
-        assert_eq!(
-            issue,
-            Some(SignalQualityIssue::Missing5g {
-                access_technology: Some("lte".to_string())
-            })
-        );
-    }
-
-    #[test]
-    fn signal_quality_detects_weak_5g_rsrp() {
-        let issue = signal_quality_issue(
-            &CellWanStatusObject {
-                intf_current_access_technology: Some("NR5G-NSA".to_string()),
-                nsa_rsrp: Some(-115.0),
-                ..Default::default()
-            },
-            &signal_config(),
-        );
-
-        assert_eq!(
-            issue,
-            Some(SignalQualityIssue::Weak5gRsrp {
-                rsrp: -115.0,
-                threshold: -110.0,
-            })
-        );
-    }
-
-    #[test]
-    fn signal_quality_accepts_healthy_5g_rsrp() {
-        let issue = signal_quality_issue(
-            &CellWanStatusObject {
-                intf_current_access_technology: Some("NR5G-NSA".to_string()),
-                nsa_rsrp: Some(-95.0),
-                ..Default::default()
-            },
-            &signal_config(),
-        );
-
-        assert_eq!(issue, None);
     }
 }
