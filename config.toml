@@ -20,3 +20,11 @@ wait_after = 60
 [monitor.reload]
 switch_wait = 15
 restore_wait = 15
+
+[telemetry]
+service_name = "zyxel-nr5103-monitor"
+endpoint = "http://localhost:4317"
+export_interval = 60
+
+[telemetry.metrics]
+enabled = false

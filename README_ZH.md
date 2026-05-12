@@ -8,7 +8,9 @@
 - 处理路由器在 HTTP 模式下的加密登录流程
 - 定期检查外网连通性
 - 在会话失效时重新认证
+- 通过接入技术重载恢复连通性，失败后再重启路由器
 - 在多次失败后自动重启路由器
+- 通过 OpenTelemetry (OTLP) 导出监控指标
 - 以 systemd 服务方式运行
 
 ## 当前状态
@@ -19,6 +21,7 @@
 - HTTP 登录加密支持
 - TOML 配置加载
 - 监控循环与恢复流程
+- OpenTelemetry 指标导出
 - musl 交叉编译支持
 - systemd 部署文件
 
@@ -61,6 +64,14 @@ wait_after = 60
 [monitor.reload]
 switch_wait = 15
 restore_wait = 15
+
+[telemetry]
+service_name = "zyxel-nr5103-monitor"
+endpoint = "http://localhost:4317"
+export_interval = 60
+
+[telemetry.metrics]
+enabled = false
 ```
 
 ### 配置字段说明
@@ -107,6 +118,16 @@ restore_wait = 15
 - `monitor.reboot.wait_after = 60`
 - `monitor.reload.switch_wait = 15`
 - `monitor.reload.restore_wait = 15`
+
+#### `[telemetry]`
+
+- `service_name`：OpenTelemetry resource `service.name` 属性值
+- `endpoint`：OTLP gRPC 端点地址（如 `http://localhost:4317`）
+- `export_interval`：指标导出间隔，单位秒
+
+#### `[telemetry.metrics]`
+
+- `enabled`：`true` 或 `false`，默认为 `false`
 
 ## 构建
 
@@ -199,6 +220,101 @@ journalctl -u zyxel-nr5103-monitor -f
 - HTTP 模式会使用路由器的 RSA/AES 加密登录流程。
 - HTTPS 模式不会走这套加密引导，而是直接发送普通请求。
 - 程序会接受路由器的自签名证书，这是为局域网环境刻意保留的行为。
+
+## OpenTelemetry
+
+程序支持通过 OpenTelemetry Protocol (OTLP) 导出监控指标。所有遥测信号默认**关闭**。
+
+### 配置方式
+
+```toml
+[telemetry]
+service_name = "zyxel-nr5103-monitor"  # OTel resource service.name
+endpoint = "http://localhost:4317"     # OTLP gRPC 端点
+export_interval = 60                   # 指标导出间隔，单位秒
+
+[telemetry.metrics]
+enabled = true
+
+[telemetry.traces]
+enabled = false   # 暂未实现
+
+[telemetry.logs]
+enabled = false   # 暂未实现
+```
+
+#### 默认值
+
+- `telemetry.service_name = "zyxel-nr5103-monitor"`
+- `telemetry.export_interval = 60`
+- `telemetry.metrics.enabled = false`
+- `telemetry.traces.enabled = false`
+- `telemetry.logs.enabled = false`
+
+### 导出的指标
+
+#### 设备与系统
+
+| 指标名称                             | 类型  | 单位 | 属性                | 说明                 |
+| ------------------------------------ | ----- | ---- | ------------------- | -------------------- |
+| `zyxel.device.uptime.seconds`          | Gauge | `s`    | —                   | 设备运行时长         |
+| `zyxel.system.cpu.usage.percent`       | Gauge | `%`    | —                   | CPU 使用率           |
+| `zyxel.system.memory.bytes`            | Gauge | `By`   | `state` = `total`/`free` | 总内存与可用内存     |
+
+#### 蜂窝信号
+
+| 指标名称                    | 类型  | 单位 | 属性                  | 说明                                  |
+| --------------------------- | ----- | ---- | --------------------- | ------------------------------------- |
+| `zyxel.cellular.signal.dbm`     | Gauge | `dBm`  | `radio`, `kind`         | 信号强度 (dBm)，用于 RSSI、RSRP      |
+| `zyxel.cellular.signal.db`      | Gauge | `dB`   | `radio`, `kind`         | 信号强度 (dB)，用于 RSRQ、SINR       |
+
+`radio` 取值：`lte`、`nr_nsa`、`scc`
+`kind` 取值：`rssi`、`rsrp`、`rsrq`、`sinr`
+
+#### 网络接口
+
+| 指标名称                            | 类型    | 单位     | 属性                                     | 说明                  |
+| ----------------------------------- | ------- | -------- | ---------------------------------------- | --------------------- |
+| `zyxel.interface.traffic.bytes`       | Counter | `By`       | `interface_type`, `interface_name`, `direction` | 接口流量字节数（增量） |
+| `zyxel.interface.traffic.packets`     | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | 接口流量包数（增量）   |
+| `zyxel.interface.errors`              | Counter | `{error}`  | `interface_type`, `interface_name`, `direction` | 接口错误数（增量）     |
+| `zyxel.interface.discards`            | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | 接口丢包数（增量）     |
+
+`interface_type` 取值：`ip`、`ethernet`
+`direction` 取值：`sent`、`received`
+
+#### LAN 端口
+
+| 指标名称          | 类型  | 单位 | 属性     | 说明                               |
+| ----------------- | ----- | ---- | -------- | ---------------------------------- |
+| `zyxel.lan.port.up` | Gauge | —    | `port_name` | `1` = 链路正常，`0` = 链路断开 |
+
+#### 连通性监控
+
+| 指标名称                                  | 类型      | 单位 | 说明                 |
+| ----------------------------------------- | --------- | ---- | -------------------- |
+| `zyxel.monitor.connectivity.rtt.ms`         | Histogram | `ms`   | 连通性探测往返时延   |
+| `zyxel.monitor.connectivity.failures`       | Counter   | —    | 连通性探测失败次数   |
+
+#### 恢复：重启
+
+| 指标名称                                | 类型    | 单位 | 说明                 |
+| --------------------------------------- | ------- | ---- | -------------------- |
+| `zyxel.monitor.reboot.attempts`           | Counter | —    | 重启恢复尝试次数     |
+| `zyxel.monitor.reboot.successes`          | Counter | —    | 重启命令成功次数     |
+
+#### 恢复：重载
+
+| 指标名称                                    | 类型      | 单位 | 说明                             |
+| ------------------------------------------- | --------- | ---- | -------------------------------- |
+| `zyxel.monitor.reload.attempts`               | Counter   | —    | 重载恢复尝试次数                 |
+| `zyxel.monitor.reload.successes`              | Counter   | —    | 重载恢复成功次数（连通性已恢复） |
+| `zyxel.monitor.reload.failures`               | Counter   | —    | 重载恢复失败次数（连通性未恢复） |
+| `zyxel.monitor.reload.duration.seconds`       | Histogram | `s`    | 重载恢复过程总耗时               |
+
+### 隐私保护
+
+遥测模块会在导出前主动剥离敏感标识符（IMEI、IMSI、IP 地址、MAC 地址、会话密钥等），不会将其上报到遥测后端。
 
 ## English documentation
 

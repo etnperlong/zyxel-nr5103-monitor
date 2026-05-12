@@ -8,7 +8,9 @@ It can:
 - handle the router's encrypted HTTP login flow
 - periodically check external connectivity
 - re-authenticate if the session expires
+- recover connectivity via access-technology reload before rebooting
 - reboot the router after repeated failures
+- export metrics via OpenTelemetry (OTLP)
 - run as a systemd service
 
 ## Status
@@ -19,6 +21,7 @@ Implemented core features:
 - crypto support for HTTP login
 - config loading from TOML
 - monitor loop and recovery flow
+- OpenTelemetry metrics export
 - musl cross-build support
 - systemd deployment assets
 
@@ -61,6 +64,14 @@ wait_after = 60
 [monitor.reload]
 switch_wait = 15
 restore_wait = 15
+
+[telemetry]
+service_name = "zyxel-nr5103-monitor"
+endpoint = "http://localhost:4317"
+export_interval = 60
+
+[telemetry.metrics]
+enabled = false
 ```
 
 ### Config fields
@@ -107,6 +118,16 @@ restore_wait = 15
 - `monitor.reboot.wait_after = 60`
 - `monitor.reload.switch_wait = 15`
 - `monitor.reload.restore_wait = 15`
+
+#### `[telemetry]`
+
+- `service_name`: OpenTelemetry resource `service.name` attribute
+- `endpoint`: OTLP gRPC endpoint URL (e.g. `http://localhost:4317`)
+- `export_interval`: seconds between metric exports
+
+#### `[telemetry.metrics]`
+
+- `enabled`: `true` or `false`, defaults to `false`
 
 ## Build
 
@@ -199,6 +220,101 @@ journalctl -u zyxel-nr5103-monitor -f
 - HTTP mode uses the router's RSA/AES encrypted login flow.
 - HTTPS mode skips that bootstrap and uses direct JSON requests.
 - Self-signed router certificates are accepted intentionally for local-network usage.
+
+## OpenTelemetry
+
+The monitor can export metrics via the OpenTelemetry Protocol (OTLP). All telemetry signals are **disabled by default**.
+
+### Configuration
+
+```toml
+[telemetry]
+service_name = "zyxel-nr5103-monitor"  # OTel resource service.name
+endpoint = "http://localhost:4317"     # OTLP gRPC endpoint
+export_interval = 60                   # seconds between metric exports
+
+[telemetry.metrics]
+enabled = true
+
+[telemetry.traces]
+enabled = false   # not yet implemented
+
+[telemetry.logs]
+enabled = false   # not yet implemented
+```
+
+#### Defaults
+
+- `telemetry.service_name = "zyxel-nr5103-monitor"`
+- `telemetry.export_interval = 60`
+- `telemetry.metrics.enabled = false`
+- `telemetry.traces.enabled = false`
+- `telemetry.logs.enabled = false`
+
+### Exported metrics
+
+#### Device and system
+
+| Name                             | Type  | Unit | Attributes          | Description                              |
+| -------------------------------- | ----- | ---- | ------------------- | ---------------------------------------- |
+| `zyxel.device.uptime.seconds`      | Gauge | `s`    | —                   | Device uptime in seconds                 |
+| `zyxel.system.cpu.usage.percent`   | Gauge | `%`    | —                   | CPU usage percentage                     |
+| `zyxel.system.memory.bytes`        | Gauge | `By`   | `state` = `total`/`free` | Total and free memory                    |
+
+#### Cellular signal
+
+| Name                    | Type  | Unit | Attributes              | Description                                            |
+| ----------------------- | ----- | ---- | ----------------------- | ------------------------------------------------------ |
+| `zyxel.cellular.signal.dbm` | Gauge | `dBm`  | `radio`, `kind`           | Signal strength in dBm (RSSI, RSRP)                   |
+| `zyxel.cellular.signal.db`  | Gauge | `dB`   | `radio`, `kind`           | Signal strength in dB (RSRQ, SINR)                     |
+
+`radio` values: `lte`, `nr_nsa`, `scc`
+`kind` values: `rssi`, `rsrp`, `rsrq`, `sinr`
+
+#### Network interfaces
+
+| Name                            | Type    | Unit     | Attributes                                 | Description                              |
+| ------------------------------- | ------- | -------- | ------------------------------------------ | ---------------------------------------- |
+| `zyxel.interface.traffic.bytes`   | Counter | `By`       | `interface_type`, `interface_name`, `direction` | Traffic bytes (delta per export)         |
+| `zyxel.interface.traffic.packets` | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | Traffic packets (delta per export)       |
+| `zyxel.interface.errors`          | Counter | `{error}`  | `interface_type`, `interface_name`, `direction` | Interface errors (delta per export)      |
+| `zyxel.interface.discards`        | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | Interface discards (delta per export)    |
+
+`interface_type` values: `ip`, `ethernet`
+`direction` values: `sent`, `received`
+
+#### LAN ports
+
+| Name           | Type  | Unit | Attributes | Description                              |
+| -------------- | ----- | ---- | ---------- | ---------------------------------------- |
+| `zyxel.lan.port.up` | Gauge | —    | `port_name`  | `1` = link up, `0` = link down           |
+
+#### Connectivity monitoring
+
+| Name                                  | Type      | Unit | Description                              |
+| ------------------------------------- | --------- | ---- | ---------------------------------------- |
+| `zyxel.monitor.connectivity.rtt.ms`     | Histogram | `ms`   | Round-trip latency of connectivity checks |
+| `zyxel.monitor.connectivity.failures`   | Counter   | —    | Connectivity check failure count         |
+
+#### Recovery: reboot
+
+| Name                                | Type    | Unit | Description                              |
+| ----------------------------------- | ------- | ---- | ---------------------------------------- |
+| `zyxel.monitor.reboot.attempts`       | Counter | —    | Reboot recovery attempts                 |
+| `zyxel.monitor.reboot.successes`      | Counter | —    | Successful reboot commands               |
+
+#### Recovery: reload
+
+| Name                                    | Type      | Unit | Description                              |
+| --------------------------------------- | --------- | ---- | ---------------------------------------- |
+| `zyxel.monitor.reload.attempts`           | Counter   | —    | Reload recovery attempts                 |
+| `zyxel.monitor.reload.successes`          | Counter   | —    | Reload recoveries that restored connectivity |
+| `zyxel.monitor.reload.failures`           | Counter   | —    | Reload recoveries that failed to restore connectivity |
+| `zyxel.monitor.reload.duration.seconds`   | Histogram | `s`    | Total duration of reload recovery cycles |
+
+### Privacy
+
+The telemetry module intentionally strips sensitive identifiers (IMEI, IMSI, IP addresses, MAC addresses, session keys) before exporting any metric data.
 
 ## Chinese documentation
 
