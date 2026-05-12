@@ -14,6 +14,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicI64, Ordering},
 };
+use tracing::{Level, debug, enabled};
 
 use crate::config::RouterConfig;
 use crypto::{CryptoState, EncryptedResponse};
@@ -27,6 +28,18 @@ fn append_session_key(url: &mut String, session_key: i64) {
     url.push(separator);
     url.push_str("sessionkey=");
     url.push_str(&session_key.to_string());
+}
+
+fn json_for_debug<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|error| format!("<failed to serialize: {error}>"))
+}
+
+fn bytes_for_debug(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+fn response_looks_encrypted(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<EncryptedResponse>(bytes).is_ok()
 }
 
 pub struct ZyxelClient {
@@ -145,6 +158,12 @@ impl ZyxelClient {
             other => bail!("Unsupported HTTP method: {other}"),
         };
 
+        let debug_request_body = if enabled!(Level::DEBUG) {
+            body.map(json_for_debug)
+        } else {
+            None
+        };
+
         let request_builder = if let Some(body) = body {
             let request_builder = request_builder.header(
                 header::CONTENT_TYPE,
@@ -165,21 +184,55 @@ impl ZyxelClient {
             request_builder
         };
 
+        if let Some(body) = debug_request_body.as_deref() {
+            debug!(
+                method = ep.method,
+                url = %url,
+                encrypted = !self.use_https && ep.encrypt_request,
+                body = %body,
+                "Router API request"
+            );
+        } else {
+            debug!(
+                method = ep.method,
+                url = %url,
+                encrypted = false,
+                "Router API request"
+            );
+        }
+
         let http_response = request_builder
             .send()
             .await
             .context("HTTP request failed")?;
 
-        if !http_response.status().is_success() {
-            bail!("HTTP {} for {}", http_response.status(), path);
-        }
+        let status = http_response.status();
 
         let raw_bytes = http_response.bytes().await?;
+
+        if !status.is_success() {
+            debug!(
+                method = ep.method,
+                url = %url,
+                status = %status,
+                body = %bytes_for_debug(&raw_bytes),
+                "Router API error response"
+            );
+            bail!("HTTP {} for {}", status, path);
+        }
+
         if raw_bytes.is_empty() {
+            debug!(
+                method = ep.method,
+                url = %url,
+                status = %status,
+                "Router API empty response"
+            );
             return Ok(None);
         }
 
-        let json_bytes = if !self.use_https && ep.encrypt_request && body.is_some() {
+        let encrypted_response = !self.use_https && response_looks_encrypted(&raw_bytes);
+        let json_bytes = if encrypted_response {
             let encrypted_response: EncryptedResponse = serde_json::from_slice(&raw_bytes)?;
             let crypto = self
                 .crypto
@@ -189,6 +242,15 @@ impl ZyxelClient {
         } else {
             raw_bytes.to_vec()
         };
+
+        debug!(
+            method = ep.method,
+            url = %url,
+            status = %status,
+            encrypted = encrypted_response,
+            body = %bytes_for_debug(&json_bytes),
+            "Router API response"
+        );
 
         self.try_extract_session_key(&json_bytes);
 

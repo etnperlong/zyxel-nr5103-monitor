@@ -1,6 +1,7 @@
 use anyhow::Result;
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use super::{ApiEndpoint, ZyxelClient};
 
@@ -80,6 +81,13 @@ impl ZyxelClient {
             url.push_str(&format!("?sessionkey={session_key}"));
         }
 
+        debug!(
+            method = LOGOUT_EP.method,
+            url = %url,
+            encrypted = false,
+            "Router API request"
+        );
+
         let response = self
             .http
             .post(&url)
@@ -87,9 +95,27 @@ impl ZyxelClient {
             .await
             .map_err(anyhow::Error::from)?;
 
-        if !response.status().is_success() {
-            anyhow::bail!("HTTP {} for {}", response.status(), LOGOUT_EP.path);
+        let status = response.status();
+        let body = response.bytes().await.map_err(anyhow::Error::from)?;
+
+        if !status.is_success() {
+            debug!(
+                method = LOGOUT_EP.method,
+                url = %url,
+                status = %status,
+                body = %String::from_utf8_lossy(&body),
+                "Router API error response"
+            );
+            anyhow::bail!("HTTP {} for {}", status, LOGOUT_EP.path);
         }
+
+        debug!(
+            method = LOGOUT_EP.method,
+            url = %url,
+            status = %status,
+            body = %String::from_utf8_lossy(&body),
+            "Router API response"
+        );
 
         Ok(())
     }

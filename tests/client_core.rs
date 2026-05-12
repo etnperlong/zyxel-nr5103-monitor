@@ -208,3 +208,88 @@ async fn execute_uses_form_content_type_and_handles_encrypted_http_flow() {
     assert_eq!(response["ok"], true);
     assert_eq!(client.session_key(), 99);
 }
+
+#[tokio::test]
+async fn execute_decrypts_encrypted_http_get_response() {
+    let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let public_key_pem = private_key
+        .to_public_key()
+        .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+        .unwrap();
+    let rsa_response = http_json_response(format!(
+        r#"{{"RSAPublicKey":{}}}"#,
+        serde_json::to_string(&public_key_pem).unwrap()
+    ));
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut rsa_stream, _) = listener.accept().unwrap();
+        let mut rsa_buffer = [0_u8; 2048];
+        let _ = rsa_stream.read(&mut rsa_buffer).unwrap();
+        rsa_stream.write_all(rsa_response.as_bytes()).unwrap();
+        rsa_stream.flush().unwrap();
+
+        let (mut login_stream, _) = listener.accept().unwrap();
+        let mut login_buffer = [0_u8; 8192];
+        let login_read = login_stream.read(&mut login_buffer).unwrap();
+        let login_request = String::from_utf8(login_buffer[..login_read].to_vec()).unwrap();
+        let login_body = login_request.split("\r\n\r\n").nth(1).unwrap();
+        let login_payload: Value = serde_json::from_str(login_body).unwrap();
+        let encrypted_key = B64.decode(login_payload["key"].as_str().unwrap()).unwrap();
+        let encoded_aes_key = private_key
+            .decrypt(Pkcs1v15Encrypt, &encrypted_key)
+            .unwrap();
+        let aes_key_vec = B64.decode(encoded_aes_key).unwrap();
+        let aes_key: [u8; 32] = aes_key_vec.try_into().unwrap();
+        let login_response = http_json_response(encrypt_response_payload(
+            &aes_key,
+            r#"{"result":"ZCFG_SUCCESS","sessionkey":123}"#,
+        ));
+        login_stream.write_all(login_response.as_bytes()).unwrap();
+        login_stream.flush().unwrap();
+
+        let (mut get_stream, _) = listener.accept().unwrap();
+        let mut get_buffer = [0_u8; 2048];
+        let get_read = get_stream.read(&mut get_buffer).unwrap();
+        let get_request = String::from_utf8(get_buffer[..get_read].to_vec()).unwrap();
+        assert!(get_request.starts_with("GET /cgi-bin/DAL?oid=status&sessionkey=123 "));
+
+        let encrypted_response =
+            encrypt_response_payload(&aes_key, r#"{"result":"ZCFG_SUCCESS","Object":[]}"#);
+        let response = http_json_response(encrypted_response);
+        get_stream.write_all(response.as_bytes()).unwrap();
+        get_stream.flush().unwrap();
+    });
+
+    let client = ZyxelClient::new(&RouterConfig {
+        host: addr.to_string(),
+        protocol: "http".to_string(),
+        username: "admin".to_string(),
+        password: "secret".to_string(),
+    })
+    .await
+    .unwrap();
+
+    client.login().await.unwrap();
+
+    let response = client
+        .execute::<(), Value>(
+            &ApiEndpoint {
+                path: "/cgi-bin/DAL?oid=status",
+                method: "GET",
+                requires_auth: true,
+                encrypt_request: false,
+                include_aes_key: false,
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    server.join().unwrap();
+
+    assert_eq!(response["result"], "ZCFG_SUCCESS");
+}
