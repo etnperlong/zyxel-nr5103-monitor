@@ -1,10 +1,14 @@
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 
 #[derive(Debug, Deserialize)]
-#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+#[serde(bound(deserialize = "T: DeserializeOwned"))]
 pub struct DalResponse<T> {
     pub result: String,
-    #[serde(rename = "Object", default)]
+    #[serde(
+        rename = "Object",
+        default,
+        deserialize_with = "deserialize_vec_or_single"
+    )]
     pub object: Vec<T>,
 }
 
@@ -39,7 +43,11 @@ pub struct StatusObject {
     pub memory_status: Option<MemoryStatus>,
     #[serde(rename = "ProcessStatus", default)]
     pub process_status: Option<ProcessStatus>,
-    #[serde(rename = "LanPortInfo", default)]
+    #[serde(
+        rename = "LanPortInfo",
+        default,
+        deserialize_with = "deserialize_vec_or_single"
+    )]
     pub lan_port_info: Vec<LanPortInfo>,
 }
 
@@ -193,7 +201,11 @@ pub struct CellWanStatusObject {
         deserialize_with = "deserialize_optional_f64"
     )]
     pub nsa_sinr: Option<f64>,
-    #[serde(rename = "SCC_Info", default)]
+    #[serde(
+        rename = "SCC_Info",
+        default,
+        deserialize_with = "deserialize_vec_or_single"
+    )]
     pub scc_info: Vec<SccInfo>,
 }
 
@@ -299,13 +311,29 @@ pub struct CellWanBandObject {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 pub struct TrafficStatusObject {
-    #[serde(rename = "ipIface", default)]
+    #[serde(
+        rename = "ipIface",
+        default,
+        deserialize_with = "deserialize_vec_or_single"
+    )]
     pub ip_iface: Vec<IpInterface>,
-    #[serde(rename = "ipIfaceSt", default)]
+    #[serde(
+        rename = "ipIfaceSt",
+        default,
+        deserialize_with = "deserialize_vec_or_single"
+    )]
     pub ip_iface_st: Vec<InterfaceStats>,
-    #[serde(rename = "ethIface", default)]
+    #[serde(
+        rename = "ethIface",
+        default,
+        deserialize_with = "deserialize_vec_or_single"
+    )]
     pub eth_iface: Vec<EthernetInterface>,
-    #[serde(rename = "ethIfaceSt", default)]
+    #[serde(
+        rename = "ethIfaceSt",
+        default,
+        deserialize_with = "deserialize_vec_or_single"
+    )]
     pub eth_iface_st: Vec<InterfaceStats>,
 }
 
@@ -1060,6 +1088,31 @@ where
     D: Deserializer<'de>,
 {
     Ok(Option::<FlexibleValue>::deserialize(deserializer)?.and_then(FlexibleValue::into_bool))
+}
+
+fn deserialize_vec_or_single<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let Some(value) = Option::<serde_json::Value>::deserialize(deserializer)? else {
+        return Ok(Vec::new());
+    };
+
+    match value {
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .map(serde_json::from_value)
+            .collect::<Result<Vec<T>, _>>()
+            .map_err(serde::de::Error::custom),
+        serde_json::Value::Object(_) => serde_json::from_value(value)
+            .map(|item| vec![item])
+            .map_err(serde::de::Error::custom),
+        serde_json::Value::Null | serde_json::Value::String(_) => Ok(Vec::new()),
+        other => serde_json::from_value(other)
+            .map(|item| vec![item])
+            .map_err(serde::de::Error::custom),
+    }
 }
 
 #[derive(Debug, Deserialize)]

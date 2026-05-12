@@ -262,6 +262,26 @@ fn router_telemetry_snapshot_from_dal_responses_allows_missing_optional_endpoint
 }
 
 #[test]
+fn cellwan_status_accepts_single_object_and_non_array_scc_info() {
+    let response = parse_response::<CellWanStatusObject>(
+        r#"{
+            "result":"ZCFG_SUCCESS",
+            "Object":{
+              "INTF_Current_Access_Technology":"NR5G-NSA",
+              "NSA_RSRP":"-95",
+              "SCC_Info":""
+            }
+        }"#,
+    );
+
+    let status = response
+        .into_first_object()
+        .expect("single object should deserialize");
+    assert_eq!(status.nsa_rsrp, Some(-95.0));
+    assert!(status.scc_info.is_empty());
+}
+
+#[test]
 fn router_telemetry_snapshot_drops_sensitive_text_like_values() {
     let status = parse_response::<StatusObject>(
         r#"{

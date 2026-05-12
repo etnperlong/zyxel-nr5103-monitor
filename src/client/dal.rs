@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 
 use super::{ApiEndpoint, ZyxelClient};
 
@@ -20,10 +20,14 @@ const DAL_SET_EP: ApiEndpoint = ApiEndpoint {
 };
 
 #[derive(Debug, Deserialize)]
-#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+#[serde(bound(deserialize = "T: DeserializeOwned"))]
 pub struct DalResponse<T> {
     pub result: String,
-    #[serde(rename = "Object", default)]
+    #[serde(
+        rename = "Object",
+        default,
+        deserialize_with = "deserialize_vec_or_single"
+    )]
     pub object: Vec<T>,
 }
 
@@ -84,6 +88,31 @@ impl ZyxelClient {
 fn is_success_result(result: &str) -> bool {
     let trimmed = result.trim();
     trimmed.eq_ignore_ascii_case("ZCFG_SUCCESS") || trimmed.eq_ignore_ascii_case("SUCCESS")
+}
+
+fn deserialize_vec_or_single<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let Some(value) = Option::<serde_json::Value>::deserialize(deserializer)? else {
+        return Ok(Vec::new());
+    };
+
+    match value {
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .map(serde_json::from_value)
+            .collect::<Result<Vec<T>, _>>()
+            .map_err(serde::de::Error::custom),
+        serde_json::Value::Object(_) => serde_json::from_value(value)
+            .map(|item| vec![item])
+            .map_err(serde::de::Error::custom),
+        serde_json::Value::Null | serde_json::Value::String(_) => Ok(Vec::new()),
+        other => serde_json::from_value(other)
+            .map(|item| vec![item])
+            .map_err(serde::de::Error::custom),
+    }
 }
 
 #[cfg(test)]
