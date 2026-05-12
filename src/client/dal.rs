@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use super::{ApiEndpoint, ZyxelClient};
 
@@ -10,6 +10,32 @@ const DAL_EP: ApiEndpoint = ApiEndpoint {
     encrypt_request: false,
     include_aes_key: false,
 };
+
+const DAL_SET_EP: ApiEndpoint = ApiEndpoint {
+    path: "/cgi-bin/DAL",
+    method: "PUT",
+    requires_auth: true,
+    encrypt_request: true,
+    include_aes_key: false,
+};
+
+#[derive(Debug, Deserialize)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
+pub struct DalResponse<T> {
+    pub result: String,
+    #[serde(rename = "Object", default)]
+    pub object: Vec<T>,
+}
+
+impl<T> DalResponse<T> {
+    pub fn into_first_object(self) -> Option<T> {
+        if !is_success_result(&self.result) {
+            return None;
+        }
+
+        self.object.into_iter().next()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DalOid {
@@ -41,6 +67,23 @@ impl ZyxelClient {
             .await?
             .context("Empty response from DAL endpoint")
     }
+
+    pub async fn set_dal<Req, Resp>(&self, oid: DalOid, body: &Req) -> Result<Resp>
+    where
+        Req: Serialize,
+        Resp: DeserializeOwned,
+    {
+        let path = format!("{}?oid={}", DAL_SET_EP.path, oid.as_str());
+
+        self.execute_path(&DAL_SET_EP, &path, Some(body))
+            .await?
+            .context("Empty response from DAL endpoint")
+    }
+}
+
+fn is_success_result(result: &str) -> bool {
+    let trimmed = result.trim();
+    trimmed.eq_ignore_ascii_case("ZCFG_SUCCESS") || trimmed.eq_ignore_ascii_case("SUCCESS")
 }
 
 #[cfg(test)]

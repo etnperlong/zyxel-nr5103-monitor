@@ -5,7 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use zyxel_nr5103_monitor::config;
+use zyxel_nr5103_monitor::config::{self, RecoveryMethod};
 
 fn env_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -76,6 +76,18 @@ password = "secret"
     assert_eq!(loaded.monitor.timeout, Duration::from_secs(5));
     assert_eq!(loaded.monitor.max_retries, 1);
     assert_eq!(loaded.monitor.min_reboot_interval, Duration::from_secs(300));
+    assert_eq!(
+        loaded.monitor.recovery_method,
+        RecoveryMethod::AccessTechnologySwitchThenReboot
+    );
+    assert_eq!(
+        loaded.monitor.access_technology_switch_wait,
+        Duration::from_secs(15)
+    );
+    assert_eq!(
+        loaded.monitor.access_technology_restore_wait,
+        Duration::from_secs(15)
+    );
 
     fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }
@@ -103,6 +115,43 @@ password = "secret"
     let loaded = config::load_config().expect("config should load from local file");
 
     assert_eq!(loaded.router.protocol, "https");
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_config_allows_explicit_recovery_method() {
+    let _env_guard = lock_env();
+    let temp_dir = unique_temp_dir();
+    let _dir_guard = CurrentDirGuard::change_to(&temp_dir);
+
+    fs::write(
+        temp_dir.join("config.toml"),
+        r#"
+[router]
+host = "172.16.0.1"
+username = "monitor"
+password = "secret"
+
+[monitor]
+recovery_method = "reboot"
+access_technology_switch_wait = 9
+access_technology_restore_wait = 11
+"#,
+    )
+    .expect("config file should be written");
+
+    let loaded = config::load_config().expect("config should load with explicit recovery settings");
+
+    assert_eq!(loaded.monitor.recovery_method, RecoveryMethod::Reboot);
+    assert_eq!(
+        loaded.monitor.access_technology_switch_wait,
+        Duration::from_secs(9)
+    );
+    assert_eq!(
+        loaded.monitor.access_technology_restore_wait,
+        Duration::from_secs(11)
+    );
 
     fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }

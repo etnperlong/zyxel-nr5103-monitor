@@ -53,6 +53,9 @@ url = "https://www.gstatic.com/generate_204"
 timeout = 10
 max_retries = 4
 min_reboot_interval = 3600
+recovery_method = "access_technology_switch_then_reboot"
+access_technology_switch_wait = 15
+access_technology_restore_wait = 15
 ```
 
 ### Config fields
@@ -67,6 +70,9 @@ min_reboot_interval = 3600
 - `monitor.timeout`: request timeout in seconds
 - `monitor.max_retries`: consecutive failures before recovery triggers
 - `monitor.min_reboot_interval`: minimum seconds between reboots
+- `monitor.recovery_method`: recovery strategy, `access_technology_switch_then_reboot` (default) or `reboot`
+- `monitor.access_technology_switch_wait`: seconds to wait after temporarily switching preferred access technology
+- `monitor.access_technology_restore_wait`: seconds to wait after switching the preferred access technology back
 
 ## Build
 

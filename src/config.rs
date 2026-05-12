@@ -34,6 +34,25 @@ pub struct MonitorConfig {
     pub max_retries: u32,
     #[serde(default = "default_min_reboot_interval_secs", with = "duration_secs")]
     pub min_reboot_interval: Duration,
+    #[serde(default = "default_recovery_method")]
+    pub recovery_method: RecoveryMethod,
+    #[serde(
+        default = "default_access_technology_switch_wait_secs",
+        with = "duration_secs"
+    )]
+    pub access_technology_switch_wait: Duration,
+    #[serde(
+        default = "default_access_technology_restore_wait_secs",
+        with = "duration_secs"
+    )]
+    pub access_technology_restore_wait: Duration,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryMethod {
+    AccessTechnologySwitchThenReboot,
+    Reboot,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -105,6 +124,18 @@ fn default_max_retries() -> u32 {
 
 fn default_min_reboot_interval_secs() -> Duration {
     Duration::from_secs(300)
+}
+
+fn default_recovery_method() -> RecoveryMethod {
+    RecoveryMethod::AccessTechnologySwitchThenReboot
+}
+
+fn default_access_technology_switch_wait_secs() -> Duration {
+    Duration::from_secs(15)
+}
+
+fn default_access_technology_restore_wait_secs() -> Duration {
+    Duration::from_secs(15)
 }
 
 mod duration_secs {

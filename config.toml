@@ -12,3 +12,6 @@ url = "https://www.gstatic.com/generate_204"
 timeout = 10
 max_retries = 4
 min_reboot_interval = 3600
+recovery_method = "access_technology_switch_then_reboot"
+access_technology_switch_wait = 15
+access_technology_restore_wait = 15

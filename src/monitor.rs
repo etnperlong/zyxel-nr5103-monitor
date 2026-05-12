@@ -1,11 +1,20 @@
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
-use crate::client::ZyxelClient;
-use crate::config::MonitorConfig;
+use crate::client::{ZyxelClient, dal::DalOid};
+use crate::config::{MonitorConfig, RecoveryMethod};
 use crate::telemetry::metrics::TelemetryCollector;
+
+const ACCESS_TECHNOLOGY_AUTO: &str = "Auto";
+const ACCESS_TECHNOLOGY_NR5G_SA: &str = "NR5G-SA";
+
+enum RecoveryOutcome {
+    ConnectivityRestored,
+    Rebooted,
+}
 
 pub struct Monitor {
     client: Arc<ZyxelClient>,
@@ -71,27 +80,23 @@ impl Monitor {
                             );
 
                             if failure_count >= self.config.max_retries {
-                                let cooldown_ok = last_reboot
+                                let reboot_allowed = last_reboot
                                     .map(|instant| instant.elapsed() >= self.config.min_reboot_interval)
                                     .unwrap_or(true);
 
-                                if cooldown_ok {
-                                    info!("Triggering router reboot after {} failures", failure_count);
-                                    if let Some(telemetry) = self.telemetry.as_ref() {
-                                        telemetry.record_reboot_attempt();
-                                    }
+                                info!("Triggering connection recovery after {} failures", failure_count);
 
-                                    if let Err(_err) = self.recovery().await {
-                                        error!("Recovery failed");
-                                    } else {
-                                        if let Some(telemetry) = self.telemetry.as_ref() {
-                                            telemetry.record_reboot_success();
-                                        }
+                                match self.recovery(reboot_allowed).await {
+                                    Ok(RecoveryOutcome::ConnectivityRestored) => {
+                                        failure_count = 0;
+                                    }
+                                    Ok(RecoveryOutcome::Rebooted) => {
                                         last_reboot = Some(Instant::now());
                                         failure_count = 0;
                                     }
-                                } else {
-                                    debug!("Reboot cooldown not elapsed, skipping");
+                                    Err(err) => {
+                                        error!(error = %err, "Recovery failed");
+                                    }
                                 }
                             }
                         }
@@ -130,19 +135,105 @@ impl Monitor {
         Ok(start.elapsed())
     }
 
-    async fn recovery(&self) -> Result<()> {
+    async fn recovery(&self, reboot_allowed: bool) -> Result<RecoveryOutcome> {
         self.check_auth().await?;
-        self.client.reboot().await?;
-        Ok(())
+
+        match self.config.recovery_method {
+            RecoveryMethod::AccessTechnologySwitchThenReboot => {
+                match self.try_access_technology_recovery().await {
+                    Ok(true) => return Ok(RecoveryOutcome::ConnectivityRestored),
+                    Ok(false) => warn!(
+                        "Access technology recovery did not restore connectivity, falling back to reboot"
+                    ),
+                    Err(err) => warn!(
+                        error = %err,
+                        "Access technology recovery failed, falling back to reboot"
+                    ),
+                }
+
+                if !reboot_allowed {
+                    anyhow::bail!("Reboot cooldown not elapsed for recovery fallback");
+                }
+
+                self.reboot_router().await
+            }
+            RecoveryMethod::Reboot => {
+                if !reboot_allowed {
+                    anyhow::bail!("Reboot cooldown not elapsed");
+                }
+
+                self.reboot_router().await
+            }
+        }
     }
 
     async fn check_auth(&self) -> Result<()> {
-        if let Err(_err) = self.client.get_basic_information().await {
+        if let Err(_err) = self
+            .client
+            .get_dal::<serde_json::Value>(DalOid::Status)
+            .await
+        {
             warn!("Session check failed, re-logging in");
             let _ = self.client.logout().await;
             self.client.login().await?;
         }
 
         Ok(())
+    }
+
+    async fn try_access_technology_recovery(&self) -> Result<bool> {
+        let original = self.client.get_cellwan_band().await?;
+        let original_preferred = original.preferred_access_technology.clone();
+        let temporary_preferred = if original_preferred == ACCESS_TECHNOLOGY_NR5G_SA {
+            ACCESS_TECHNOLOGY_AUTO
+        } else {
+            ACCESS_TECHNOLOGY_NR5G_SA
+        };
+
+        let mut switch_config = original.clone();
+        switch_config.preferred_access_technology = temporary_preferred.to_string();
+
+        info!(
+            preferred_access_technology = %temporary_preferred,
+            "Temporarily switching preferred access technology"
+        );
+        self.client.set_cellwan_band(&switch_config).await?;
+        sleep(self.config.access_technology_switch_wait).await;
+
+        let mut restore_config = original;
+        restore_config.preferred_access_technology = original_preferred;
+
+        info!(
+            preferred_access_technology = %restore_config.preferred_access_technology,
+            "Restoring preferred access technology"
+        );
+        self.client.set_cellwan_band(&restore_config).await?;
+        sleep(self.config.access_technology_restore_wait).await;
+
+        match self.check_connectivity().await {
+            Ok(_) => Ok(true),
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "Connectivity still unavailable after access technology recovery"
+                );
+                Ok(false)
+            }
+        }
+    }
+
+    async fn reboot_router(&self) -> Result<RecoveryOutcome> {
+        info!("Rebooting router as part of recovery");
+        if let Some(telemetry) = self.telemetry.as_ref() {
+            telemetry.record_reboot_attempt();
+        }
+
+        self.client.reboot().await?;
+
+        if let Some(telemetry) = self.telemetry.as_ref() {
+            telemetry.record_reboot_success();
+        }
+
+        Ok(RecoveryOutcome::Rebooted)
     }
 }

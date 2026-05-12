@@ -53,6 +53,9 @@ url = "https://www.gstatic.com/generate_204"
 timeout = 10
 max_retries = 4
 min_reboot_interval = 3600
+recovery_method = "access_technology_switch_then_reboot"
+access_technology_switch_wait = 15
+access_technology_restore_wait = 15
 ```
 
 ### 配置字段说明
@@ -67,6 +70,9 @@ min_reboot_interval = 3600
 - `monitor.timeout`：请求超时时间，单位秒
 - `monitor.max_retries`：连续失败多少次后触发恢复逻辑
 - `monitor.min_reboot_interval`：两次重启之间的最小间隔，单位秒
+- `monitor.recovery_method`：恢复策略，可选 `access_technology_switch_then_reboot`（默认）或 `reboot`
+- `monitor.access_technology_switch_wait`：临时切换 Preferred Access Technology 后等待的秒数
+- `monitor.access_technology_restore_wait`：切换回原有 Preferred Access Technology 后等待的秒数
 
 ## 构建
 

@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod cellular;
 pub mod crypto;
 pub mod dal;
 pub mod device;
@@ -139,6 +140,7 @@ impl ZyxelClient {
         let request_builder = match ep.method {
             "GET" => self.http.get(&url),
             "POST" => self.http.post(&url),
+            "PUT" => self.http.put(&url),
             "DELETE" => self.http.delete(&url),
             other => bail!("Unsupported HTTP method: {other}"),
         };
