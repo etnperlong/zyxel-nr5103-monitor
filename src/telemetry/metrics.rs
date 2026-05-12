@@ -187,22 +187,14 @@ impl MetricRecorder {
                 .build(),
             monitor_reboot_attempts: meter.u64_counter("zyxel.monitor.reboot.attempts").build(),
             monitor_reboot_successes: meter.u64_counter("zyxel.monitor.reboot.successes").build(),
-            monitor_reload_attempts: meter
-                .u64_counter("zyxel.monitor.reload.attempts")
-                .build(),
-            monitor_reload_successes: meter
-                .u64_counter("zyxel.monitor.reload.successes")
-                .build(),
-            monitor_reload_failures: meter
-                .u64_counter("zyxel.monitor.reload.failures")
-                .build(),
+            monitor_reload_attempts: meter.u64_counter("zyxel.monitor.reload.attempts").build(),
+            monitor_reload_successes: meter.u64_counter("zyxel.monitor.reload.successes").build(),
+            monitor_reload_failures: meter.u64_counter("zyxel.monitor.reload.failures").build(),
             monitor_reload_duration_seconds: meter
                 .f64_histogram("zyxel.monitor.reload.duration.seconds")
                 .with_unit("s")
                 .build(),
-            monitor_signal_degraded: meter
-                .u64_counter("zyxel.monitor.signal.degraded")
-                .build(),
+            monitor_signal_degraded: meter.u64_counter("zyxel.monitor.signal.degraded").build(),
             monitor_signal_recovery_attempts: meter
                 .u64_counter("zyxel.monitor.signal.recovery.attempts")
                 .build(),
