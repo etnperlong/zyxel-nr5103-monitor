@@ -1,0 +1,328 @@
+name: Release
+
+run-name: Release ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version from Cargo.toml (without the v prefix)
+        required: true
+        type: string
+      prerelease:
+        description: Mark this release as a prerelease
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: zyxel-nr5103-monitor
+
+jobs:
+  validate:
+    name: Validate release input
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+      tag: ${{ steps.validate.outputs.tag }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate requested version
+        id: validate
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          requested_version="${INPUT_VERSION}"
+
+          if [[ ! "$requested_version" =~ ^[0-9A-Za-z.+-]+$ ]]; then
+            echo "::error::The requested version contains invalid characters."
+            exit 1
+          fi
+
+          cargo_version="$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f2)"
+
+          if [[ -z "$cargo_version" ]]; then
+            echo "::error::Could not determine the package version from Cargo.toml."
+            exit 1
+          fi
+
+          if [[ "$requested_version" != "$cargo_version" ]]; then
+            echo "::error::Requested version '$requested_version' does not match Cargo.toml version '$cargo_version'; refusing to build."
+            exit 1
+          fi
+
+          {
+            echo "version=$cargo_version"
+            echo "tag=v$cargo_version"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    continue-on-error: ${{ matrix.optional }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            rust_targets: x86_64-unknown-linux-musl
+            package_os: linux
+            package_arch: amd64
+            package_variant: ""
+            archive_ext: tar.gz
+            bin_suffix: ""
+            build_tool: cargo
+            linux_musl_native: true
+            optional: false
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            rust_targets: aarch64-unknown-linux-musl
+            package_os: linux
+            package_arch: arm64
+            package_variant: ""
+            archive_ext: tar.gz
+            bin_suffix: ""
+            build_tool: cargo
+            linux_musl_native: true
+            optional: false
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
+            package_os: windows
+            package_arch: amd64
+            package_variant: ""
+            archive_ext: zip
+            bin_suffix: .exe
+            build_tool: cargo
+            linux_musl_native: false
+            optional: false
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            rust_targets: aarch64-pc-windows-msvc
+            package_os: windows
+            package_arch: arm64
+            package_variant: ""
+            archive_ext: zip
+            bin_suffix: .exe
+            build_tool: cargo
+            linux_musl_native: false
+            optional: false
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            rust_targets: x86_64-apple-darwin
+            package_os: darwin
+            package_arch: amd64
+            package_variant: ""
+            archive_ext: tar.gz
+            bin_suffix: ""
+            build_tool: cargo
+            linux_musl_native: false
+            optional: false
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
+            package_os: darwin
+            package_arch: arm64
+            package_variant: ""
+            archive_ext: tar.gz
+            bin_suffix: ""
+            build_tool: cargo
+            linux_musl_native: false
+            optional: false
+          - runner: ubuntu-24.04
+            target: i686-unknown-linux-musl
+            rust_targets: ""
+            package_os: linux
+            package_arch: 386
+            package_variant: ""
+            archive_ext: tar.gz
+            bin_suffix: ""
+            build_tool: cross
+            linux_musl_native: false
+            optional: true
+          - runner: ubuntu-24.04
+            target: armv7-unknown-linux-musleabihf
+            rust_targets: ""
+            package_os: linux
+            package_arch: arm
+            package_variant: v7
+            archive_ext: tar.gz
+            bin_suffix: ""
+            build_tool: cross
+            linux_musl_native: false
+            optional: true
+          - runner: ubuntu-24.04
+            target: arm-unknown-linux-musleabihf
+            rust_targets: ""
+            package_os: linux
+            package_arch: arm
+            package_variant: v6
+            archive_ext: tar.gz
+            bin_suffix: ""
+            build_tool: cross
+            linux_musl_native: false
+            optional: true
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Build target with cargo
+        if: ${{ matrix.build_tool == 'cargo' }}
+        uses: ./.github/actions/release-build-cargo
+        with:
+          target: ${{ matrix.target }}
+          rust_targets: ${{ matrix.rust_targets }}
+          linux_musl_native: ${{ matrix.linux_musl_native }}
+
+      - name: Build target with cross
+        if: ${{ matrix.build_tool == 'cross' }}
+        uses: ./.github/actions/release-build-cross
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Package and upload artifact
+        uses: ./.github/actions/release-package
+        with:
+          version: ${{ needs.validate.outputs.version }}
+          target: ${{ matrix.target }}
+          package_os: ${{ matrix.package_os }}
+          package_arch: ${{ matrix.package_arch }}
+          package_variant: ${{ matrix.package_variant }}
+          archive_ext: ${{ matrix.archive_ext }}
+          bin_suffix: ${{ matrix.bin_suffix }}
+          binary_name: ${{ env.BINARY_NAME }}
+
+  publish-release:
+    name: Publish GitHub release
+    if: ${{ always() && needs.validate.result == 'success' && needs.build.result == 'success' }}
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BINARY_NAME: zyxel-nr5103-monitor
+      VERSION: ${{ needs.validate.outputs.version }}
+      TAG: ${{ needs.validate.outputs.tag }}
+      PRERELEASE: ${{ inputs.prerelease }}
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify downloadable assets exist
+        shell: bash
+        run: |
+          shopt -s nullglob
+          assets=(dist/*.tar.gz dist/*.zip)
+          if ((${#assets[@]} == 0)); then
+            echo "::error::No build artifacts are available to publish."
+            exit 1
+          fi
+
+      - name: Create SHA256 checksums
+        shell: bash
+        run: |
+          cd dist
+          shopt -s nullglob
+          assets=( *.tar.gz *.zip )
+          sha256sum "${assets[@]}" > "${BINARY_NAME}_${VERSION}_checksums.txt"
+
+      - name: Create release notes preface
+        shell: bash
+        run: |
+          cat > release-preface.md <<EOF
+          ## Release
+
+          - Version: \`${TAG}\`
+          - Commit: \`${GITHUB_SHA}\`
+          - Workflow: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+
+          ## Artifacts
+
+          Archive names follow a GoReleaser-style pattern:
+
+          \`${BINARY_NAME}_${VERSION}_<os>_<arch>[variant].<ext>\`
+
+          Examples in this release include:
+
+          - \`${BINARY_NAME}_${VERSION}_linux_amd64.tar.gz\`
+          - \`${BINARY_NAME}_${VERSION}_darwin_arm64.tar.gz\`
+          - \`${BINARY_NAME}_${VERSION}_windows_amd64.zip\`
+          - \`${BINARY_NAME}_${VERSION}_linux_armv7.tar.gz\`
+
+          ## Checksums
+
+          - \`${BINARY_NAME}_${VERSION}_checksums.txt\`
+
+          ## Build Notes
+
+          - Version input is validated against \`Cargo.toml\` before any build starts.
+          - Native builds run on GitHub-hosted Linux, Windows, and macOS runners.
+          - Additional embedded Linux musl targets are built with \`cross\` when no native hosted runner is available.
+          EOF
+
+      - name: Fail if tag already exists
+        shell: bash
+        run: |
+          if gh api "repos/${GH_REPO}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag ${TAG} already exists; refusing to overwrite the release."
+            exit 1
+          fi
+
+      - name: Publish release
+        shell: bash
+        run: |
+          shopt -s nullglob
+          args=(
+            "$TAG"
+            dist/*.tar.gz
+            dist/*.zip
+            "dist/${BINARY_NAME}_${VERSION}_checksums.txt"
+            --target "$GITHUB_SHA"
+            --title "${BINARY_NAME} ${TAG}"
+            --notes "$(cat release-preface.md)"
+            --generate-notes
+          )
+
+          if [[ "$PRERELEASE" == 'true' ]]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "${args[@]}"
+
+      - name: Write summary
+        shell: bash
+        run: |
+          {
+            echo "## Release published"
+            echo
+            echo "- Tag: \`${TAG}\`"
+            echo "- Release: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          } >> "$GITHUB_STEP_SUMMARY"

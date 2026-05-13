@@ -1,0 +1,62 @@
+name: Release build with cargo
+description: Build a release target with cargo on a native runner
+
+inputs:
+  target:
+    description: Rust target triple
+    required: true
+  rust_targets:
+    description: Toolchain targets to install
+    required: true
+  linux_musl_native:
+    description: Whether to install and configure musl-tools on Linux
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ inputs.rust_targets }}
+
+    - name: Restore Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: release-${{ inputs.target }}
+
+    - name: Install Linux musl toolchain
+      if: ${{ inputs.linux_musl_native == 'true' }}
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+    - name: Configure Linux musl linker
+      if: ${{ inputs.linux_musl_native == 'true' }}
+      shell: bash
+      env:
+        INPUT_TARGET: ${{ inputs.target }}
+      run: |
+        target_env="${INPUT_TARGET^^}"
+        target_env="${target_env//-/_}"
+        target_cc="${INPUT_TARGET//-/_}"
+
+        {
+          echo "CARGO_TARGET_${target_env}_LINKER=musl-gcc"
+          echo "CC_${target_cc}=musl-gcc"
+        } >> "$GITHUB_ENV"
+
+    - name: Enable static CRT on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        "RUSTFLAGS=-C target-feature=+crt-static" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+    - name: Build release binary on Windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: cargo build --locked --release --target "${{ inputs.target }}"
+
+    - name: Build release binary on non-Windows platforms
+      if: runner.os != 'Windows'
+      shell: bash
+      run: cargo build --locked --release --target "${{ inputs.target }}"

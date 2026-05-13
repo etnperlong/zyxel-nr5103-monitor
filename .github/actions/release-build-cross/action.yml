@@ -1,0 +1,27 @@
+name: Release build with cross
+description: Build a release target with cross on a Linux runner
+
+inputs:
+  target:
+    description: Rust target triple
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Restore Rust cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: release-${{ inputs.target }}
+
+    - name: Install cross
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cross
+
+    - name: Build release binary
+      shell: bash
+      run: cross build --locked --release --target "${{ inputs.target }}"
