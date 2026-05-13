@@ -1,0 +1,143 @@
+# Example configuration for zyxel-nr5103-monitor.
+#
+# Copy this file to `config.toml` and adjust the values for your router and
+# telemetry backend. `config.toml` is intentionally ignored by git because it
+# usually contains local router credentials and telemetry authorization tokens.
+
+# Tracing filter used by the local console logger.
+# Common values: "info", "debug", "trace".
+log_level = "info"
+
+[router]
+# Router hostname or IP address without the http:// or https:// prefix.
+host = "172.16.0.1"
+
+# Router protocol. Supported values: "http" or "https".
+# Default: "http".
+protocol = "http"
+
+# Router login credentials.
+username = "monitor"
+password = "change-me"
+
+[monitor]
+# Global default interval between monitor checks, in seconds.
+# Default: 60.
+interval = 60
+
+# Global default number of consecutive failures before recovery starts.
+# Default: 1.
+max_retries = 1
+
+# Recovery flow to use when a monitored condition stays unhealthy.
+# Supported values:
+# - "reload": temporarily switch preferred access technology, switch it back,
+#   then reboot if still unhealthy.
+# - "reboot": reboot immediately.
+# Default: "reload".
+recovery_method = "reload"
+
+[monitor.internet]
+# Enable external internet connectivity checks.
+# Default: true.
+enabled = true
+
+# URL used for connectivity checks.
+# Default: "http://www.gstatic.com/generate_204".
+url = "http://www.gstatic.com/generate_204"
+
+# HTTP request timeout for connectivity checks, in seconds.
+# Default: 5.
+timeout = 5
+
+# Optional override for internet connectivity check interval, in seconds.
+# If omitted, inherits monitor.interval.
+# interval = 60
+
+# Optional override for consecutive internet failures before recovery.
+# If omitted, inherits monitor.max_retries.
+# max_retries = 1
+
+[monitor.signal]
+# Enable cellular signal-quality monitoring.
+# Default: false.
+enabled = false
+
+# Optional override for signal-quality check interval, in seconds.
+# If omitted, inherits monitor.interval.
+# interval = 60
+
+# Treat fallback to non-5G access technology as degraded.
+# Default: false.
+require_5g = false
+
+# Minimum acceptable 5G RSRP in dBm before signal recovery starts.
+# Default: -110.
+min_5g_rsrp = -110
+
+# Optional consecutive degraded signal checks before recovery.
+# If omitted, inherits monitor.max_retries.
+# max_retries = 1
+
+[action.reboot]
+# Minimum interval between two reboot attempts, in seconds.
+# Default: 300.
+min_interval = 300
+
+# Seconds to wait after issuing a reboot before checks resume.
+# Default: 60.
+wait_after = 60
+
+[action.reload]
+# Seconds to wait after switching preferred access technology.
+# Default: 15.
+switch_wait = 15
+
+# Seconds to wait after restoring preferred access technology.
+# Default: 15.
+restore_wait = 15
+
+[telemetry]
+# OpenTelemetry resource service.name.
+# Default: "zyxel-nr5103-monitor".
+service_name = "zyxel-nr5103-monitor"
+
+# OTLP endpoint.
+# For local OTLP/gRPC collectors, use something like:
+# endpoint = "http://localhost:4317"
+# For Grafana Cloud's OpenTelemetry setup, use the endpoint it provides, e.g.:
+# endpoint = "https://otlp-gateway-prod-eu-west-0.grafana.net/otlp"
+endpoint = "http://localhost:4317"
+
+# Optional OTLP authorization header value.
+# Use the value from Grafana Cloud's OTEL_EXPORTER_OTLP_HEADERS after
+# `Authorization=`, for example "Basic ...". Do not commit real tokens.
+# authorization = "Basic replace-with-grafana-cloud-token"
+
+# OTLP exporter protocol.
+# Supported values:
+# - "grpc": OTLP/gRPC, typically for local collectors on port 4317.
+# - "http/protobuf": OTLP HTTP/protobuf, recommended by Grafana Cloud setup.
+# Default: "grpc".
+protocol = "grpc"
+
+# Metric export interval, in seconds.
+# Default: 60.
+export_interval = 60
+
+[telemetry.metrics]
+# Enable OpenTelemetry metrics export.
+# Default: false.
+enabled = false
+
+[telemetry.traces]
+# Enable OpenTelemetry trace export.
+# Default: false.
+# Note: exporter support exists, but application trace instrumentation is still limited.
+enabled = false
+
+[telemetry.logs]
+# Enable OpenTelemetry log export.
+# Default: false.
+# Note: exporter support exists, but application log signal coverage is still limited.
+enabled = false

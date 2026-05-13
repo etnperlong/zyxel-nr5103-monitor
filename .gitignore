@@ -1,1 +1,6 @@
 /target
+
+.agents
+.hive
+opencode.json
+config.toml
