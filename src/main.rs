@@ -5,7 +5,7 @@ mod telemetry;
 
 use anyhow::Result;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,6 +13,8 @@ async fn main() -> Result<()> {
 
     let telemetry = telemetry::otel::TelemetryRuntime::init(&cfg.telemetry)?;
     telemetry::otel::install_subscriber(&cfg.log_level, &telemetry)?;
+    debug!(log_level = %cfg.log_level, "Tracing subscriber installed");
+    telemetry::otel::log_debug_configuration(&cfg.telemetry);
 
     let monitor_result = async {
         info!("Starting zyxel-nr5103-monitor");

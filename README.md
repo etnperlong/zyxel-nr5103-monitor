@@ -80,6 +80,8 @@ restore_wait = 15
 [telemetry]
 service_name = "zyxel-nr5103-monitor"
 endpoint = "http://localhost:4317"
+# authorization = "Bearer glc_your_grafana_cloud_token"
+protocol = "grpc"
 export_interval = 60
 
 [telemetry.metrics]
@@ -155,6 +157,8 @@ enabled = false
 
 - `service_name`: OpenTelemetry resource `service.name` attribute
 - `endpoint`: OTLP gRPC endpoint URL (e.g. `http://localhost:4317`)
+- `authorization`: optional `authorization` metadata header for OTLP/gRPC exporters, such as `Bearer glc_...` for Grafana Cloud
+- `protocol`: OTLP exporter protocol, either `grpc` (default) or `http/protobuf`
 - `export_interval`: seconds between metric exports
 
 #### `[telemetry.metrics]`
@@ -263,6 +267,8 @@ The monitor can export metrics via the OpenTelemetry Protocol (OTLP). All teleme
 [telemetry]
 service_name = "zyxel-nr5103-monitor"  # OTel resource service.name
 endpoint = "http://localhost:4317"     # OTLP gRPC endpoint
+# authorization = "Bearer glc_your_grafana_cloud_token"
+protocol = "grpc"                      # grpc or http/protobuf
 export_interval = 60                   # seconds between metric exports
 
 [telemetry.metrics]
@@ -278,6 +284,8 @@ enabled = false   # not yet implemented
 #### Defaults
 
 - `telemetry.service_name = "zyxel-nr5103-monitor"`
+- `telemetry.authorization` is unset
+- `telemetry.protocol = "grpc"`
 - `telemetry.export_interval = 60`
 - `telemetry.metrics.enabled = false`
 - `telemetry.traces.enabled = false`

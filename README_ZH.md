@@ -80,6 +80,8 @@ restore_wait = 15
 [telemetry]
 service_name = "zyxel-nr5103-monitor"
 endpoint = "http://localhost:4317"
+# authorization = "Bearer glc_your_grafana_cloud_token"
+protocol = "grpc"
 export_interval = 60
 
 [telemetry.metrics]
@@ -155,6 +157,8 @@ enabled = false
 
 - `service_name`：OpenTelemetry resource `service.name` 属性值
 - `endpoint`：OTLP gRPC 端点地址（如 `http://localhost:4317`）
+- `authorization`：可选的 OTLP/gRPC `authorization` metadata header，例如 Grafana Cloud 的 `Bearer glc_...`
+- `protocol`：OTLP exporter 协议，可选 `grpc`（默认）或 `http/protobuf`
 - `export_interval`：指标导出间隔，单位秒
 
 #### `[telemetry.metrics]`
@@ -263,6 +267,8 @@ journalctl -u zyxel-nr5103-monitor -f
 [telemetry]
 service_name = "zyxel-nr5103-monitor"  # OTel resource service.name
 endpoint = "http://localhost:4317"     # OTLP gRPC 端点
+# authorization = "Bearer glc_your_grafana_cloud_token"
+protocol = "grpc"                      # grpc 或 http/protobuf
 export_interval = 60                   # 指标导出间隔，单位秒
 
 [telemetry.metrics]
@@ -278,6 +284,8 @@ enabled = false   # 暂未实现
 #### 默认值
 
 - `telemetry.service_name = "zyxel-nr5103-monitor"`
+- `telemetry.authorization` 未设置
+- `telemetry.protocol = "grpc"`
 - `telemetry.export_interval = 60`
 - `telemetry.metrics.enabled = false`
 - `telemetry.traces.enabled = false`

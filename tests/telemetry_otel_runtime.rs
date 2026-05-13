@@ -1,12 +1,14 @@
 use std::time::Duration;
 
-use zyxel_nr5103_monitor::config::{TelemetryConfig, TelemetrySignalConfig};
+use zyxel_nr5103_monitor::config::{TelemetryConfig, TelemetryProtocol, TelemetrySignalConfig};
 use zyxel_nr5103_monitor::telemetry::otel::TelemetryRuntime;
 
 fn telemetry_config(endpoint: &str) -> TelemetryConfig {
     TelemetryConfig {
         service_name: "zyxel-nr5103-monitor-test".to_string(),
         endpoint: Some(endpoint.to_string()),
+        authorization: None,
+        protocol: TelemetryProtocol::Grpc,
         export_interval: Duration::from_secs(1),
         metrics: TelemetrySignalConfig::default(),
         traces: TelemetrySignalConfig::default(),

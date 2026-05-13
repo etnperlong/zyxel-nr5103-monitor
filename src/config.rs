@@ -161,6 +161,10 @@ pub struct TelemetryConfig {
     pub service_name: String,
     #[serde(default)]
     pub endpoint: Option<String>,
+    #[serde(default)]
+    pub authorization: Option<String>,
+    #[serde(default)]
+    pub protocol: TelemetryProtocol,
     #[serde(default = "default_export_interval_secs", with = "duration_secs")]
     pub export_interval: Duration,
     #[serde(default)]
@@ -176,10 +180,31 @@ impl Default for TelemetryConfig {
         Self {
             service_name: default_service_name(),
             endpoint: None,
+            authorization: None,
+            protocol: TelemetryProtocol::Grpc,
             export_interval: default_export_interval_secs(),
             metrics: TelemetrySignalConfig::default(),
             traces: TelemetrySignalConfig::default(),
             logs: TelemetrySignalConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TelemetryProtocol {
+    #[serde(alias = "grpc")]
+    #[default]
+    Grpc,
+    #[serde(rename = "http/protobuf", alias = "http-protobuf")]
+    HttpProtobuf,
+}
+
+impl TelemetryProtocol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Grpc => "grpc",
+            Self::HttpProtobuf => "http/protobuf",
         }
     }
 }

@@ -340,6 +340,8 @@ password = "secret"
 
     assert_eq!(loaded.telemetry.service_name, "zyxel-nr5103-monitor");
     assert_eq!(loaded.telemetry.endpoint, None);
+    assert_eq!(loaded.telemetry.authorization, None);
+    assert_eq!(loaded.telemetry.protocol, config::TelemetryProtocol::Grpc);
     assert_eq!(loaded.telemetry.export_interval, Duration::from_secs(60));
     assert!(!loaded.telemetry.metrics.enabled);
     assert!(!loaded.telemetry.traces.enabled);
@@ -443,6 +445,8 @@ password = "secret"
 
 [telemetry]
 endpoint = "http://collector.internal:4317"
+authorization = "Bearer glc_test_token"
+protocol = "http/protobuf"
 export_interval = 15
 "#,
     )
@@ -454,6 +458,14 @@ export_interval = 15
     assert_eq!(
         loaded.telemetry.endpoint.as_deref(),
         Some("http://collector.internal:4317")
+    );
+    assert_eq!(
+        loaded.telemetry.authorization.as_deref(),
+        Some("Bearer glc_test_token")
+    );
+    assert_eq!(
+        loaded.telemetry.protocol,
+        config::TelemetryProtocol::HttpProtobuf
     );
     assert_eq!(loaded.telemetry.export_interval, Duration::from_secs(15));
 
