@@ -65,7 +65,8 @@ fn http_empty_response(status_line: &str) -> String {
 }
 
 fn test_public_key_pem() -> String {
-    RsaPrivateKey::new(&mut rand::thread_rng(), 2048)
+    let mut rng = rsa::rand_core::OsRng;
+    RsaPrivateKey::new(&mut rng, 2048)
         .unwrap()
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
@@ -289,7 +290,8 @@ async fn metrics_disabled_does_not_poll_dal() {
 async fn monitor_switches_access_technology_when_signal_monitor_requires_5g() {
     let _guard = lock_monitor_sigint_tests().await;
 
-    let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let mut rng = rsa::rand_core::OsRng;
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
@@ -549,7 +551,8 @@ async fn monitor_switches_access_technology_when_signal_monitor_requires_5g() {
 async fn monitor_reauthenticates_and_reboots_after_connectivity_failure_when_configured() {
     let _guard = lock_monitor_sigint_tests().await;
 
-    let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let mut rng = rsa::rand_core::OsRng;
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
@@ -733,7 +736,8 @@ async fn monitor_reauthenticates_and_reboots_after_connectivity_failure_when_con
 async fn monitor_switches_access_technology_and_skips_reboot_when_connectivity_recovers() {
     let _guard = lock_monitor_sigint_tests().await;
 
-    let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let mut rng = rsa::rand_core::OsRng;
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
@@ -969,7 +973,8 @@ async fn monitor_switches_access_technology_and_skips_reboot_when_connectivity_r
 async fn monitor_reboots_when_access_technology_recovery_does_not_restore_connectivity() {
     let _guard = lock_monitor_sigint_tests().await;
 
-    let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let mut rng = rsa::rand_core::OsRng;
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)

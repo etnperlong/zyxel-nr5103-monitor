@@ -34,7 +34,8 @@ impl CryptoState {
         let rsa_public_key =
             RsaPublicKey::from_public_key_pem(pem).context("Failed to parse RSA public key")?;
         let mut aes_key = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut aes_key);
+        let mut rng = rand::rng();
+        rng.fill_bytes(&mut aes_key);
 
         Ok(Self {
             rsa_public_key,
@@ -50,7 +51,8 @@ impl CryptoState {
         let json_bytes = serde_json::to_vec(payload).context("JSON serialization failed")?;
 
         let mut iv32 = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut iv32);
+        let mut rng = rand::rng();
+        rng.fill_bytes(&mut iv32);
         let iv16: [u8; 16] = iv32[..16]
             .try_into()
             .map_err(|_| anyhow!("IV prefix length mismatch"))?;
@@ -60,9 +62,10 @@ impl CryptoState {
 
         let key = if include_key {
             let b64_aes = B64.encode(self.aes_key);
+            let mut rng = rsa::rand_core::OsRng;
             let encrypted_key = self
                 .rsa_public_key
-                .encrypt(&mut rand::thread_rng(), Pkcs1v15Encrypt, b64_aes.as_bytes())
+                .encrypt(&mut rng, Pkcs1v15Encrypt, b64_aes.as_bytes())
                 .context("RSA encryption failed")?;
 
             Some(B64.encode(encrypted_key))
@@ -111,7 +114,8 @@ mod tests {
     }
 
     fn test_keypair() -> RsaPrivateKey {
-        RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap()
+        let mut rng = rsa::rand_core::OsRng;
+        RsaPrivateKey::new(&mut rng, 2048).unwrap()
     }
 
     fn test_public_key_pem(private_key: &RsaPrivateKey) -> String {

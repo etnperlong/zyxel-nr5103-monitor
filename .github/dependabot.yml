@@ -13,6 +13,22 @@ updates:
       - cargo
     commit-message:
       prefix: build(deps)
+    # OpenTelemetry 0.32.x is currently incompatible with the released
+    # tracing-opentelemetry stack we use, but we still want future lines to
+    # surface automatically instead of ignoring all later releases forever.
+    ignore:
+      - dependency-name: opentelemetry
+        versions:
+          - ">= 0.32.0, < 0.33.0"
+      - dependency-name: opentelemetry_sdk
+        versions:
+          - ">= 0.32.0, < 0.33.0"
+      - dependency-name: opentelemetry-otlp
+        versions:
+          - ">= 0.32.0, < 0.33.0"
+      - dependency-name: opentelemetry-appender-tracing
+        versions:
+          - ">= 0.32.0, < 0.33.0"
     groups:
       cargo-dependencies:
         patterns:

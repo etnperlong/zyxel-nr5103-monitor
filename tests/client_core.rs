@@ -65,7 +65,8 @@ fn encrypt_response_payload(aes_key: &[u8; 32], payload: &str) -> String {
 }
 
 fn test_public_key_pem() -> String {
-    RsaPrivateKey::new(&mut rand::thread_rng(), 2048)
+    let mut rng = rsa::rand_core::OsRng;
+    RsaPrivateKey::new(&mut rng, 2048)
         .unwrap()
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
@@ -125,7 +126,8 @@ async fn execute_updates_session_key_from_json_response() {
 
 #[tokio::test]
 async fn execute_uses_form_content_type_and_handles_encrypted_http_flow() {
-    let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let mut rng = rsa::rand_core::OsRng;
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
@@ -211,7 +213,8 @@ async fn execute_uses_form_content_type_and_handles_encrypted_http_flow() {
 
 #[tokio::test]
 async fn execute_decrypts_encrypted_http_get_response() {
-    let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+    let mut rng = rsa::rand_core::OsRng;
+    let private_key = RsaPrivateKey::new(&mut rng, 2048).unwrap();
     let public_key_pem = private_key
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)

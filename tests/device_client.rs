@@ -34,7 +34,8 @@ fn http_empty_response() -> String {
 }
 
 fn test_public_key_pem() -> String {
-    RsaPrivateKey::new(&mut rand::thread_rng(), 2048)
+    let mut rng = rsa::rand_core::OsRng;
+    RsaPrivateKey::new(&mut rng, 2048)
         .unwrap()
         .to_public_key()
         .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
