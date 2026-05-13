@@ -1,234 +1,107 @@
+<div align="center">
+  <img src="assets/Banner.png" alt="Zyxel NR5103 Monitor" width="100%">
+</div>
+
 # zyxel-nr5103-monitor
 
-Rust-based network watchdog for the Zyxel NR5103 5G CPE.
+A Rust watchdog that monitors internet connectivity and 5G signal quality on the Zyxel NR5103 CPE, then recovers the connection automatically when something breaks.
 
-It can:
+[English](README.md) | [中文](README_ZH.md)
 
-- log in to the router over HTTP or HTTPS
-- handle the router's encrypted HTTP login flow
-- periodically check external connectivity
-- optionally monitor degraded 5G signal quality or fallback to 4G
-- re-authenticate if the session expires
-- recover connectivity via access-technology reload before rebooting
-- reboot the router after repeated failures
-- export metrics via OpenTelemetry (OTLP)
-- run as a systemd service
+## What it does
 
-## Status
+The monitor logs into your Zyxel NR5103 router over HTTP or HTTPS, then runs two checks on a timer: can it reach the internet, and is the 5G signal strong enough. When either check fails repeatedly, it tries to fix things -- first by reloading the access technology settings, and if that doesn't work, by rebooting the router. It re-authenticates automatically when the session expires.
 
-Implemented core features:
+It runs as a systemd service, so it starts on boot and restarts if it crashes.
 
-- router client
-- crypto support for HTTP login
-- config loading from TOML
-- monitor loop and recovery flow
-- OpenTelemetry metrics export
-- musl cross-build support
-- systemd deployment assets
+## Features
 
-## Requirements
+- HTTP and HTTPS login with RSA/AES encryption support
+- Periodic internet connectivity checks via HTTP
+- Optional 5G signal quality monitoring with configurable RSRP thresholds
+- Automatic session re-authentication
+- Two-stage recovery: access technology reload, then reboot as fallback
+- OpenTelemetry metrics export (OTLP gRPC and HTTP/protobuf)
+- TOML configuration with layered file sources
+- Static musl builds for x86_64 and aarch64
+- Systemd service deployment
 
-- Rust toolchain
-- `cargo`
-- for musl builds on x86_64 in this repo: `clang`, `llvm-ar`, and the Rust musl target
+## Quick start
+
+### Requirements
+
+- Rust toolchain (install via [rustup](https://rustup.rs/))
+- For musl cross-builds: `clang`, `llvm-ar`, and the corresponding Rust musl target
+
+### Build
+
+```bash
+cargo build --release
+```
+
+### Configure
+
+Copy the example config and edit it for your router:
+
+```bash
+cp config.example.toml config.toml
+```
+
+At minimum, set your router's IP address and login credentials:
+
+```toml
+[router]
+host = "172.16.0.1"
+username = "admin"
+password = "your-password"
+```
+
+### Run
+
+```bash
+cargo run --release
+```
+
+The monitor logs in, fetches device info, and starts the monitoring loop. Press `Ctrl+C` to stop.
 
 ## Configuration
 
 The application loads config from the first available TOML source in this order:
 
 1. `./config.toml`
-2. `$HOME/.config/nr5103/config.toml` (loaded via config basename `.../config`)
-3. `/etc/nr5103/config.toml` (loaded via config basename `/etc/nr5103/config`)
+2. `$HOME/.config/nr5103/config.toml`
+3. `/etc/nr5103/config.toml`
 
-Example:
+Later sources override earlier ones. See [`config.example.toml`](config.example.toml) for all available options with comments.
 
-```toml
-log_level = "info"
+### Key settings
 
-[router]
-host = "172.16.0.1"
-protocol = "http"
-username = "monitor"
-password = "Monitor5103"
+| Section | Setting | Default | Description |
+|---------|---------|---------|-------------|
+| `[router]` | `host` | -- | Router IP address |
+| `[router]` | `protocol` | `http` | `http` or `https` |
+| `[monitor]` | `interval` | `60` | Seconds between checks |
+| `[monitor]` | `max_retries` | `1` | Consecutive failures before recovery |
+| `[monitor]` | `recovery_method` | `reload` | `reload` or `reboot` |
+| `[monitor.signal]` | `enabled` | `false` | Enable 5G signal monitoring |
+| `[monitor.signal]` | `require_5g` | `false` | Treat non-5G fallback as degraded |
+| `[monitor.signal]` | `min_5g_rsrp` | `-110` | Minimum 5G RSRP (dBm) |
+| `[telemetry]` | `endpoint` | -- | OTLP endpoint URL |
+| `[telemetry.metrics]` | `enabled` | `false` | Enable metrics export |
 
-[monitor]
-interval = 15
-max_retries = 4
-recovery_method = "reload"
+### How recovery works
 
-[monitor.internet]
-url = "https://www.gstatic.com/generate_204"
-timeout = 10
-# interval = 15       # optional, inherits monitor.interval when omitted
-# max_retries = 4    # optional, inherits monitor.max_retries when omitted
+The `reload` recovery method (the default) does this:
 
-[monitor.signal]
-enabled = true
-# interval = 15       # optional, inherits monitor.interval when omitted
-require_5g = true
-min_5g_rsrp = -110
-max_retries = 2
+1. Switch the preferred access technology from its current value to `NR5G-SA`
+2. Wait, then switch it back to the original value
+3. If the monitored condition is still unhealthy, reboot the router
 
-[action.reboot]
-min_interval = 3600
-wait_after = 60
-
-[action.reload]
-switch_wait = 15
-restore_wait = 15
-
-[telemetry]
-service_name = "zyxel-nr5103-monitor"
-endpoint = "http://localhost:4317"
-# authorization = "Bearer glc_your_grafana_cloud_token"
-protocol = "grpc"
-export_interval = 60
-
-[telemetry.metrics]
-enabled = false
-```
-
-### Config fields
-
-#### Top-level
-
-- `log_level`: tracing filter such as `info` or `debug`
-
-#### `[router]`
-
-- `host`: router hostname or address, without `http://` or `https://`
-- `protocol`: `http` or `https`, defaults to `http`
-- `username`: router login username
-- `password`: router login password
-
-#### `[monitor]`
-
-- `interval`: global default seconds between monitor checks; child monitors inherit it unless they set their own `interval`
-- `max_retries`: global default number of consecutive failures before recovery starts; child monitors inherit it unless they set their own `max_retries`
-- `recovery_method`: recovery flow to use:
-  - `reload` (default): temporarily switch the preferred access technology, switch it back, then reboot if the monitored condition is still unhealthy
-  - `reboot`: skip the reload step and reboot immediately
-
-#### `[monitor.internet]`
-
-- `url`: URL used for external internet connectivity checks
-- `timeout`: request timeout in seconds
-- `interval`: optional override for internet connectivity checks; defaults to `monitor.interval`
-- `max_retries`: optional override for internet connectivity failures; defaults to `monitor.max_retries`
-
-#### `[monitor.signal]`
-
-- `enabled`: enable signal-quality monitoring, defaults to `false`
-- `interval`: optional override for signal-quality checks; defaults to `monitor.interval`
-- `require_5g`: treat fallback to non-5G access technology as degraded, defaults to `false`
-- `min_5g_rsrp`: minimum acceptable 5G RSRP in dBm before recovery starts, defaults to `-110`
-- `max_retries`: optional number of consecutive degraded signal checks before recovery starts; defaults to `monitor.max_retries`
-
-#### `[action.reboot]`
-
-- `min_interval`: minimum seconds between two reboot attempts
-- `wait_after`: seconds to wait after issuing a reboot before connectivity checks resume
-
-#### `[action.reload]`
-
-- `switch_wait`: seconds to wait after switching the preferred access technology
-- `restore_wait`: seconds to wait after switching the preferred access technology back
-
-#### Defaults
-
-- `monitor.interval = 60`
-- `monitor.max_retries = 1`
-- `monitor.recovery_method = "reload"`
-- `monitor.internet.url = "http://www.gstatic.com/generate_204"`
-- `monitor.internet.timeout = 5`
-- `monitor.internet.interval` inherits `monitor.interval`
-- `monitor.internet.max_retries` inherits `monitor.max_retries`
-- `monitor.signal.enabled = false`
-- `monitor.signal.interval` inherits `monitor.interval`
-- `monitor.signal.require_5g = false`
-- `monitor.signal.min_5g_rsrp = -110`
-- `monitor.signal.max_retries` inherits `monitor.max_retries`
-- `action.reboot.min_interval = 300`
-- `action.reboot.wait_after = 60`
-- `action.reload.switch_wait = 15`
-- `action.reload.restore_wait = 15`
-
-#### `[telemetry]`
-
-- `service_name`: OpenTelemetry resource `service.name` attribute
-- `endpoint`: OTLP gRPC endpoint URL (e.g. `http://localhost:4317`)
-- `authorization`: optional `authorization` metadata header for OTLP/gRPC exporters, such as `Bearer glc_...` for Grafana Cloud
-- `protocol`: OTLP exporter protocol, either `grpc` (default) or `http/protobuf`
-- `export_interval`: seconds between metric exports
-
-#### `[telemetry.metrics]`
-
-- `enabled`: `true` or `false`, defaults to `false`
-
-## Build
-
-Debug build:
-
-```bash
-cargo build
-```
-
-Release build:
-
-```bash
-cargo build --release
-```
-
-Run tests and lint:
-
-```bash
-cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
-```
-
-## Run locally
-
-```bash
-cargo run --release
-```
-
-The application will:
-
-1. load config
-2. initialize logging
-3. connect to the router
-4. log in
-5. fetch device information
-6. start the monitor loop
-
-Stop with `Ctrl+C`.
-
-## Cross-compilation
-
-Add targets:
-
-```bash
-rustup target add x86_64-unknown-linux-musl
-rustup target add aarch64-unknown-linux-musl
-```
-
-Build for x86_64 musl:
-
-```bash
-cargo build --release --target x86_64-unknown-linux-musl
-```
-
-To make aarch64 the default target, uncomment the example in `.cargo/config.toml`.
+The `reboot` method skips the reload step and reboots immediately.
 
 ## Deployment
 
-Systemd assets are in `deploy/`:
-
-- `deploy/zyxel-nr5103-monitor.service`
-- `deploy/README.md`
-
-Typical installation flow:
+Systemd service files are in `deploy/`. To install as a system service:
 
 ```bash
 sudo useradd -r -s /usr/sbin/nologin monitor
@@ -239,134 +112,126 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now zyxel-nr5103-monitor
 ```
 
-For musl artifacts, replace the binary path with the target-specific output, for example:
-
-```bash
-target/x86_64-unknown-linux-musl/release/zyxel-nr5103-monitor
-```
-
-## Logs
+View logs:
 
 ```bash
 journalctl -u zyxel-nr5103-monitor -f
 ```
 
-## Notes
+For musl builds, replace the binary path with the target-specific output (e.g., `target/x86_64-unknown-linux-musl/release/zyxel-nr5103-monitor`).
 
-- HTTP mode uses the router's RSA/AES encrypted login flow.
-- HTTPS mode skips that bootstrap and uses direct JSON requests.
-- Self-signed router certificates are accepted intentionally for local-network usage.
+## Cross-compilation
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+To make aarch64 the default target, edit `.cargo/config.toml`.
 
 ## OpenTelemetry
 
-The monitor can export metrics via the OpenTelemetry Protocol (OTLP). All telemetry signals are **disabled by default**.
+The monitor can export metrics via OTLP. All telemetry signals are disabled by default.
 
-### Configuration
+Enable metrics export:
 
 ```toml
 [telemetry]
-service_name = "zyxel-nr5103-monitor"  # OTel resource service.name
-endpoint = "http://localhost:4317"     # OTLP gRPC endpoint
-# authorization = "Bearer glc_your_grafana_cloud_token"
-protocol = "grpc"                      # grpc or http/protobuf
-export_interval = 60                   # seconds between metric exports
+endpoint = "http://localhost:4317"
+protocol = "grpc"       # or "http/protobuf"
+export_interval = 60
 
 [telemetry.metrics]
 enabled = true
-
-[telemetry.traces]
-enabled = false   # not yet implemented
-
-[telemetry.logs]
-enabled = false   # not yet implemented
 ```
 
-#### Defaults
-
-- `telemetry.service_name = "zyxel-nr5103-monitor"`
-- `telemetry.authorization` is unset
-- `telemetry.protocol = "grpc"`
-- `telemetry.export_interval = 60`
-- `telemetry.metrics.enabled = false`
-- `telemetry.traces.enabled = false`
-- `telemetry.logs.enabled = false`
+The telemetry module strips sensitive identifiers (IMEI, IMSI, IP addresses, MAC addresses, session keys) before exporting.
 
 ### Exported metrics
 
 #### Device and system
 
-| Name                             | Type  | Unit | Attributes          | Description                              |
-| -------------------------------- | ----- | ---- | ------------------- | ---------------------------------------- |
-| `zyxel.device.uptime.seconds`      | Gauge | `s`    | —                   | Device uptime in seconds                 |
-| `zyxel.system.cpu.usage.percent`   | Gauge | `%`    | —                   | CPU usage percentage                     |
-| `zyxel.system.memory.bytes`        | Gauge | `By`   | `state` = `total`/`free` | Total and free memory                    |
+| Name | Type | Unit | Attributes | Description |
+|------|------|------|------------|-------------|
+| `zyxel.device.uptime.seconds` | Gauge | `s` | -- | Device uptime |
+| `zyxel.system.cpu.usage.percent` | Gauge | `%` | -- | CPU usage |
+| `zyxel.system.memory.bytes` | Gauge | `By` | `state` = `total`/`free` | Total and free memory |
 
 #### Cellular signal
 
-| Name                    | Type  | Unit | Attributes              | Description                                            |
-| ----------------------- | ----- | ---- | ----------------------- | ------------------------------------------------------ |
-| `zyxel.cellular.signal.dbm` | Gauge | `dBm`  | `radio`, `kind`           | Signal strength in dBm (RSSI, RSRP)                   |
-| `zyxel.cellular.signal.db`  | Gauge | `dB`   | `radio`, `kind`           | Signal strength in dB (RSRQ, SINR)                     |
+| Name | Type | Unit | Attributes | Description |
+|------|------|------|------------|-------------|
+| `zyxel.cellular.signal.dbm` | Gauge | `dBm` | `radio`, `kind` | Signal strength (RSSI, RSRP) |
+| `zyxel.cellular.signal.db` | Gauge | `dB` | `radio`, `kind` | Signal quality (RSRQ, SINR) |
 
-`radio` values: `lte`, `nr_nsa`, `scc`
-`kind` values: `rssi`, `rsrp`, `rsrq`, `sinr`
+`radio` values: `lte`, `nr_nsa`, `scc` | `kind` values: `rssi`, `rsrp`, `rsrq`, `sinr`
 
 #### Network interfaces
 
-| Name                            | Type    | Unit     | Attributes                                 | Description                              |
-| ------------------------------- | ------- | -------- | ------------------------------------------ | ---------------------------------------- |
-| `zyxel.interface.traffic.bytes`   | Counter | `By`       | `interface_type`, `interface_name`, `direction` | Traffic bytes (delta per export)         |
-| `zyxel.interface.traffic.packets` | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | Traffic packets (delta per export)       |
-| `zyxel.interface.errors`          | Counter | `{error}`  | `interface_type`, `interface_name`, `direction` | Interface errors (delta per export)      |
-| `zyxel.interface.discards`        | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | Interface discards (delta per export)    |
+| Name | Type | Unit | Attributes | Description |
+|------|------|------|------------|-------------|
+| `zyxel.interface.traffic.bytes` | Counter | `By` | `interface_type`, `interface_name`, `direction` | Traffic bytes (delta per export) |
+| `zyxel.interface.traffic.packets` | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | Traffic packets (delta per export) |
+| `zyxel.interface.errors` | Counter | `{error}` | `interface_type`, `interface_name`, `direction` | Interface errors (delta per export) |
+| `zyxel.interface.discards` | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | Interface discards (delta per export) |
 
-`interface_type` values: `ip`, `ethernet`
-`direction` values: `sent`, `received`
+`interface_type` values: `ip`, `ethernet` | `direction` values: `sent`, `received`
 
 #### LAN ports
 
-| Name           | Type  | Unit | Attributes | Description                              |
-| -------------- | ----- | ---- | ---------- | ---------------------------------------- |
-| `zyxel.lan.port.up` | Gauge | —    | `port_name`  | `1` = link up, `0` = link down           |
+| Name | Type | Unit | Attributes | Description |
+|------|------|------|------------|-------------|
+| `zyxel.lan.port.up` | Gauge | -- | `port_name` | `1` = link up, `0` = link down |
 
 #### Connectivity monitoring
 
-| Name                                  | Type      | Unit | Description                              |
-| ------------------------------------- | --------- | ---- | ---------------------------------------- |
-| `zyxel.monitor.connectivity.rtt.ms`     | Histogram | `ms`   | Round-trip latency of connectivity checks |
-| `zyxel.monitor.connectivity.failures`   | Counter   | —    | Connectivity check failure count         |
+| Name | Type | Unit | Description |
+|------|------|------|-------------|
+| `zyxel.monitor.connectivity.rtt.ms` | Histogram | `ms` | Round-trip latency of connectivity checks |
+| `zyxel.monitor.connectivity.failures` | Counter | -- | Connectivity check failure count |
 
 #### Signal-quality monitoring
 
-| Name                                          | Type    | Unit | Attributes | Description                                      |
-| --------------------------------------------- | ------- | ---- | ---------- | ------------------------------------------------ |
-| `zyxel.monitor.signal.degraded`                 | Counter | —    | `reason`   | Degraded signal-quality checks                   |
-| `zyxel.monitor.signal.recovery.attempts`        | Counter | —    | —          | Recovery attempts triggered by degraded signal   |
-| `zyxel.monitor.signal.recovery.successes`       | Counter | —    | —          | Successful recoveries triggered by signal checks |
-| `zyxel.monitor.signal.recovery.failures`        | Counter | —    | —          | Failed recoveries triggered by signal checks     |
+| Name | Type | Unit | Attributes | Description |
+|------|------|------|------------|-------------|
+| `zyxel.monitor.signal.degraded` | Counter | -- | `reason` | Degraded signal-quality checks |
+| `zyxel.monitor.signal.recovery.attempts` | Counter | -- | -- | Recovery attempts triggered by signal |
+| `zyxel.monitor.signal.recovery.successes` | Counter | -- | -- | Successful signal recoveries |
+| `zyxel.monitor.signal.recovery.failures` | Counter | -- | -- | Failed signal recoveries |
 
 `reason` values: `missing_5g`, `weak_5g_rsrp`
 
 #### Recovery: reboot
 
-| Name                                | Type    | Unit | Description                              |
-| ----------------------------------- | ------- | ---- | ---------------------------------------- |
-| `zyxel.monitor.reboot.attempts`       | Counter | —    | Reboot recovery attempts                 |
-| `zyxel.monitor.reboot.successes`      | Counter | —    | Successful reboot commands               |
+| Name | Type | Unit | Description |
+|------|------|------|-------------|
+| `zyxel.monitor.reboot.attempts` | Counter | -- | Reboot recovery attempts |
+| `zyxel.monitor.reboot.successes` | Counter | -- | Successful reboot commands |
 
 #### Recovery: reload
 
-| Name                                    | Type      | Unit | Description                              |
-| --------------------------------------- | --------- | ---- | ---------------------------------------- |
-| `zyxel.monitor.reload.attempts`           | Counter   | —    | Reload recovery attempts                 |
-| `zyxel.monitor.reload.successes`          | Counter   | —    | Reload recoveries that restored the monitored condition |
-| `zyxel.monitor.reload.failures`           | Counter   | —    | Reload recoveries that failed to restore the monitored condition |
-| `zyxel.monitor.reload.duration.seconds`   | Histogram | `s`    | Total duration of reload recovery cycles |
+| Name | Type | Unit | Description |
+|------|------|------|-------------|
+| `zyxel.monitor.reload.attempts` | Counter | -- | Reload recovery attempts |
+| `zyxel.monitor.reload.successes` | Counter | -- | Reloads that restored the monitored condition |
+| `zyxel.monitor.reload.failures` | Counter | -- | Reloads that did not restore the condition |
+| `zyxel.monitor.reload.duration.seconds` | Histogram | `s` | Total duration of reload recovery cycles |
 
-### Privacy
+## Technical notes
 
-The telemetry module intentionally strips sensitive identifiers (IMEI, IMSI, IP addresses, MAC addresses, session keys) before exporting any metric data.
+- HTTP mode fetches the router's RSA public key and encrypts login credentials. HTTPS mode skips this and sends plain JSON.
+- Self-signed router certificates are accepted intentionally for local-network usage.
+- The `config` crate handles layered TOML sources, so later files override earlier ones.
+- Metrics collection failures are logged but do not trigger recovery.
 
-## Chinese documentation
+---
 
-See [README_ZH.md](README_ZH.md).
+*This project is not affiliated with, endorsed by, or connected to Zyxel Group Corporation or its subsidiaries. Zyxel is a trademark of its respective owner. This is an independent, third-party project.*
+
+---
+
+<div align="center">
+  <sub>Built with <a href="https://opencode.ai/">OpenCode</a> &middot; AI-assisted development</sub>
+  <br>
+  <sub>Released under the <a href="LICENSE">MIT License</a></sub>
+</div>

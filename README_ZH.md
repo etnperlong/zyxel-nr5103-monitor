@@ -1,234 +1,107 @@
+<div align="center">
+  <img src="assets/Banner.png" alt="Zyxel NR5103 Monitor" width="100%">
+</div>
+
 # zyxel-nr5103-monitor
 
-一个面向 Zyxel NR5103 5G CPE 的 Rust 网络守护程序。
+用 Rust 写的 Zyxel NR5103 5G CPE 网络守护程序。它会监控外网连通性和 5G 信号质量，出问题时自动恢复连接。
 
-它可以：
+[English](README.md) | [中文](README_ZH.md)
 
-- 通过 HTTP 或 HTTPS 登录路由器
-- 处理路由器在 HTTP 模式下的加密登录流程
-- 定期检查外网连通性
-- 可选地监控 5G 信号质量劣化或退回 4G 的情况
-- 在会话失效时重新认证
-- 通过接入技术重载恢复连通性，失败后再重启路由器
-- 在多次失败后自动重启路由器
-- 通过 OpenTelemetry (OTLP) 导出监控指标
-- 以 systemd 服务方式运行
+## 功能概述
 
-## 当前状态
+程序通过 HTTP 或 HTTPS 登录 Zyxel NR5103 路由器，定时做两项检查：能不能访问外网，5G 信号是否正常。如果某项检查连续失败，会尝试恢复——先重载接入技术设置，不行就重启路由器。会话过期时自动重新认证。
 
-核心功能已完成：
+以 systemd 服务方式运行，开机自启，崩溃自动重启。
 
-- 路由器客户端
-- HTTP 登录加密支持
-- TOML 配置加载
-- 监控循环与恢复流程
-- OpenTelemetry 指标导出
-- musl 交叉编译支持
-- systemd 部署文件
+## 特性
 
-## 环境要求
+- 支持 HTTP 和 HTTPS 登录，HTTP 模式使用 RSA/AES 加密
+- 定期 HTTP 探测外网连通性
+- 可选的 5G 信号质量监控，支持配置 RSRP 门限
+- 会话过期自动重新认证
+- 两级恢复策略：接入技术重载 + 重启兜底
+- OpenTelemetry 指标导出（OTLP gRPC 和 HTTP/protobuf）
+- TOML 配置，支持多路径叠加加载
+- 支持 x86_64 和 aarch64 的静态 musl 构建
+- systemd 服务部署
 
-- Rust 工具链
-- `cargo`
-- 如果要在本仓库中构建 x86_64 musl 版本，还需要：`clang`、`llvm-ar` 和对应的 Rust musl target
+## 快速开始
 
-## 配置方式
+### 环境要求
 
-程序会按以下顺序读取第一个可用的 TOML 配置：
+- Rust 工具链（通过 [rustup](https://rustup.rs/) 安装）
+- 构建 musl 交叉编译版本需要：`clang`、`llvm-ar` 和对应的 Rust musl target
 
-1. `./config.toml`
-2. `$HOME/.config/nr5103/config.toml`（通过不带扩展名的 `.../config` 路径加载）
-3. `/etc/nr5103/config.toml`（通过不带扩展名的 `/etc/nr5103/config` 路径加载）
-
-示例配置：
-
-```toml
-log_level = "info"
-
-[router]
-host = "172.16.0.1"
-protocol = "http"
-username = "monitor"
-password = "Monitor5103"
-
-[monitor]
-interval = 15
-max_retries = 4
-recovery_method = "reload"
-
-[monitor.internet]
-url = "https://www.gstatic.com/generate_204"
-timeout = 10
-# interval = 15       # 可选；省略时继承 monitor.interval
-# max_retries = 4    # 可选；省略时继承 monitor.max_retries
-
-[monitor.signal]
-enabled = true
-# interval = 15       # 可选；省略时继承 monitor.interval
-require_5g = true
-min_5g_rsrp = -110
-max_retries = 2
-
-[action.reboot]
-min_interval = 3600
-wait_after = 60
-
-[action.reload]
-switch_wait = 15
-restore_wait = 15
-
-[telemetry]
-service_name = "zyxel-nr5103-monitor"
-endpoint = "http://localhost:4317"
-# authorization = "Bearer glc_your_grafana_cloud_token"
-protocol = "grpc"
-export_interval = 60
-
-[telemetry.metrics]
-enabled = false
-```
-
-### 配置字段说明
-
-#### 顶层配置
-
-- `log_level`：日志级别，例如 `info`、`debug`
-
-#### `[router]`
-
-- `host`：路由器地址，不包含 `http://` 或 `https://` 前缀
-- `protocol`：可选 `http` 或 `https`，默认值为 `http`
-- `username`：路由器用户名
-- `password`：路由器密码
-
-#### `[monitor]`
-
-- `interval`：全局默认监控间隔，单位秒；子监控项未设置 `interval` 时继承该值
-- `max_retries`：全局默认连续失败次数阈值；子监控项未设置 `max_retries` 时继承该值
-- `recovery_method`：恢复策略：
-  - `reload`（默认）：先临时切换 Preferred Access Technology，再切换回来；如果监控目标仍未恢复正常，则回退到重启
-  - `reboot`：跳过 reload 步骤，直接重启
-
-#### `[monitor.internet]`
-
-- `url`：用于检查公网访问能力的 URL
-- `timeout`：请求超时时间，单位秒
-- `interval`：可选的公网访问检查间隔；默认继承 `monitor.interval`
-- `max_retries`：可选的公网访问连续失败次数阈值；默认继承 `monitor.max_retries`
-
-#### `[monitor.signal]`
-
-- `enabled`：是否启用信号质量监控，默认值为 `false`
-- `interval`：可选的信号质量检查间隔；默认继承 `monitor.interval`
-- `require_5g`：当网络退回非 5G 接入技术时是否视为异常，默认值为 `false`
-- `min_5g_rsrp`：允许的最低 5G RSRP（dBm），低于该值会触发恢复，默认值为 `-110`
-- `max_retries`：可选的信号劣化连续失败次数阈值；默认继承 `monitor.max_retries`
-
-#### `[action.reboot]`
-
-- `min_interval`：两次重启之间的最小间隔，单位秒
-- `wait_after`：执行重启后等待多少秒，再恢复连通性检查
-
-#### `[action.reload]`
-
-- `switch_wait`：临时切换 Preferred Access Technology 后等待的秒数
-- `restore_wait`：切换回原有 Preferred Access Technology 后等待的秒数
-
-#### 默认值
-
-- `monitor.interval = 60`
-- `monitor.max_retries = 1`
-- `monitor.recovery_method = "reload"`
-- `monitor.internet.url = "http://www.gstatic.com/generate_204"`
-- `monitor.internet.timeout = 5`
-- `monitor.internet.interval` 继承 `monitor.interval`
-- `monitor.internet.max_retries` 继承 `monitor.max_retries`
-- `monitor.signal.enabled = false`
-- `monitor.signal.interval` 继承 `monitor.interval`
-- `monitor.signal.require_5g = false`
-- `monitor.signal.min_5g_rsrp = -110`
-- `monitor.signal.max_retries` 继承 `monitor.max_retries`
-- `action.reboot.min_interval = 300`
-- `action.reboot.wait_after = 60`
-- `action.reload.switch_wait = 15`
-- `action.reload.restore_wait = 15`
-
-#### `[telemetry]`
-
-- `service_name`：OpenTelemetry resource `service.name` 属性值
-- `endpoint`：OTLP gRPC 端点地址（如 `http://localhost:4317`）
-- `authorization`：可选的 OTLP/gRPC `authorization` metadata header，例如 Grafana Cloud 的 `Bearer glc_...`
-- `protocol`：OTLP exporter 协议，可选 `grpc`（默认）或 `http/protobuf`
-- `export_interval`：指标导出间隔，单位秒
-
-#### `[telemetry.metrics]`
-
-- `enabled`：`true` 或 `false`，默认为 `false`
-
-## 构建
-
-调试构建：
-
-```bash
-cargo build
-```
-
-发布构建：
+### 构建
 
 ```bash
 cargo build --release
 ```
 
-运行测试与静态检查：
+### 配置
+
+复制示例配置文件，改成你路由器的信息：
 
 ```bash
-cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+cp config.example.toml config.toml
 ```
 
-## 本地运行
+至少要填路由器地址和登录凭据：
+
+```toml
+[router]
+host = "172.16.0.1"
+username = "admin"
+password = "your-password"
+```
+
+### 运行
 
 ```bash
 cargo run --release
 ```
 
-程序启动后会：
+程序会登录路由器、读取设备信息、启动监控循环。按 `Ctrl+C` 退出。
 
-1. 加载配置
-2. 初始化日志
-3. 连接路由器
-4. 执行登录
-5. 读取设备信息
-6. 启动监控循环
+## 配置说明
 
-按 `Ctrl+C` 可退出。
+程序按以下顺序加载第一个可用的 TOML 配置：
 
-## 交叉编译
+1. `./config.toml`
+2. `$HOME/.config/nr5103/config.toml`
+3. `/etc/nr5103/config.toml`
 
-先安装 target：
+后加载的配置会覆盖前面的。所有选项见 [`config.example.toml`](config.example.toml)，里面有详细注释。
 
-```bash
-rustup target add x86_64-unknown-linux-musl
-rustup target add aarch64-unknown-linux-musl
-```
+### 主要配置项
 
-构建 x86_64 musl 版本：
+| 区块 | 字段 | 默认值 | 说明 |
+|------|------|--------|------|
+| `[router]` | `host` | -- | 路由器 IP 地址 |
+| `[router]` | `protocol` | `http` | `http` 或 `https` |
+| `[monitor]` | `interval` | `60` | 检查间隔（秒） |
+| `[monitor]` | `max_retries` | `1` | 连续失败几次触发恢复 |
+| `[monitor]` | `recovery_method` | `reload` | `reload` 或 `reboot` |
+| `[monitor.signal]` | `enabled` | `false` | 启用 5G 信号监控 |
+| `[monitor.signal]` | `require_5g` | `false` | 回退到非 5G 时视为异常 |
+| `[monitor.signal]` | `min_5g_rsrp` | `-110` | 最低 5G RSRP（dBm） |
+| `[telemetry]` | `endpoint` | -- | OTLP 端点地址 |
+| `[telemetry.metrics]` | `enabled` | `false` | 启用指标导出 |
 
-```bash
-cargo build --release --target x86_64-unknown-linux-musl
-```
+### 恢复机制
 
-如果你想把 aarch64 设为默认 target，可以取消 `.cargo/config.toml` 中示例配置的注释。
+默认的 `reload` 恢复流程：
+
+1. 把 Preferred Access Technology 从当前值切换到 `NR5G-SA`
+2. 等待一段时间，再切回原来的值
+3. 如果监控目标仍然异常，重启路由器
+
+`reboot` 方式会跳过重载步骤，直接重启。
 
 ## 部署
 
-systemd 相关文件位于 `deploy/`：
-
-- `deploy/zyxel-nr5103-monitor.service`
-- `deploy/README.md`
-
-典型安装流程：
+systemd 服务文件在 `deploy/` 目录下。安装为系统服务：
 
 ```bash
 sudo useradd -r -s /usr/sbin/nologin monitor
@@ -239,134 +112,126 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now zyxel-nr5103-monitor
 ```
 
-如果使用 musl 交叉编译产物，请把二进制路径换成目标平台对应目录，例如：
-
-```bash
-target/x86_64-unknown-linux-musl/release/zyxel-nr5103-monitor
-```
-
-## 查看日志
+查看日志：
 
 ```bash
 journalctl -u zyxel-nr5103-monitor -f
 ```
 
-## 说明
+musl 交叉编译版本需要把二进制路径换成对应目录，比如 `target/x86_64-unknown-linux-musl/release/zyxel-nr5103-monitor`。
 
-- HTTP 模式会使用路由器的 RSA/AES 加密登录流程。
-- HTTPS 模式不会走这套加密引导，而是直接发送普通请求。
-- 程序会接受路由器的自签名证书，这是为局域网环境刻意保留的行为。
+## 交叉编译
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+要把 aarch64 设为默认 target，编辑 `.cargo/config.toml`。
 
 ## OpenTelemetry
 
-程序支持通过 OpenTelemetry Protocol (OTLP) 导出监控指标。所有遥测信号默认**关闭**。
+程序支持通过 OTLP 导出监控指标。所有遥测信号默认关闭。
 
-### 配置方式
+启用指标导出：
 
 ```toml
 [telemetry]
-service_name = "zyxel-nr5103-monitor"  # OTel resource service.name
-endpoint = "http://localhost:4317"     # OTLP gRPC 端点
-# authorization = "Bearer glc_your_grafana_cloud_token"
-protocol = "grpc"                      # grpc 或 http/protobuf
-export_interval = 60                   # 指标导出间隔，单位秒
+endpoint = "http://localhost:4317"
+protocol = "grpc"       # 或 "http/protobuf"
+export_interval = 60
 
 [telemetry.metrics]
 enabled = true
-
-[telemetry.traces]
-enabled = false   # 暂未实现
-
-[telemetry.logs]
-enabled = false   # 暂未实现
 ```
 
-#### 默认值
-
-- `telemetry.service_name = "zyxel-nr5103-monitor"`
-- `telemetry.authorization` 未设置
-- `telemetry.protocol = "grpc"`
-- `telemetry.export_interval = 60`
-- `telemetry.metrics.enabled = false`
-- `telemetry.traces.enabled = false`
-- `telemetry.logs.enabled = false`
+遥测模块在导出前会剥离敏感标识符（IMEI、IMSI、IP 地址、MAC 地址、会话密钥）。
 
 ### 导出的指标
 
 #### 设备与系统
 
-| 指标名称                             | 类型  | 单位 | 属性                | 说明                 |
-| ------------------------------------ | ----- | ---- | ------------------- | -------------------- |
-| `zyxel.device.uptime.seconds`          | Gauge | `s`    | —                   | 设备运行时长         |
-| `zyxel.system.cpu.usage.percent`       | Gauge | `%`    | —                   | CPU 使用率           |
-| `zyxel.system.memory.bytes`            | Gauge | `By`   | `state` = `total`/`free` | 总内存与可用内存     |
+| 指标名称 | 类型 | 单位 | 属性 | 说明 |
+|----------|------|------|------|------|
+| `zyxel.device.uptime.seconds` | Gauge | `s` | -- | 设备运行时长 |
+| `zyxel.system.cpu.usage.percent` | Gauge | `%` | -- | CPU 使用率 |
+| `zyxel.system.memory.bytes` | Gauge | `By` | `state` = `total`/`free` | 总内存与可用内存 |
 
 #### 蜂窝信号
 
-| 指标名称                    | 类型  | 单位 | 属性                  | 说明                                  |
-| --------------------------- | ----- | ---- | --------------------- | ------------------------------------- |
-| `zyxel.cellular.signal.dbm`     | Gauge | `dBm`  | `radio`, `kind`         | 信号强度 (dBm)，用于 RSSI、RSRP      |
-| `zyxel.cellular.signal.db`      | Gauge | `dB`   | `radio`, `kind`         | 信号强度 (dB)，用于 RSRQ、SINR       |
+| 指标名称 | 类型 | 单位 | 属性 | 说明 |
+|----------|------|------|------|------|
+| `zyxel.cellular.signal.dbm` | Gauge | `dBm` | `radio`, `kind` | 信号强度（RSSI、RSRP） |
+| `zyxel.cellular.signal.db` | Gauge | `dB` | `radio`, `kind` | 信号质量（RSRQ、SINR） |
 
-`radio` 取值：`lte`、`nr_nsa`、`scc`
-`kind` 取值：`rssi`、`rsrp`、`rsrq`、`sinr`
+`radio` 取值：`lte`、`nr_nsa`、`scc` | `kind` 取值：`rssi`、`rsrp`、`rsrq`、`sinr`
 
 #### 网络接口
 
-| 指标名称                            | 类型    | 单位     | 属性                                     | 说明                  |
-| ----------------------------------- | ------- | -------- | ---------------------------------------- | --------------------- |
-| `zyxel.interface.traffic.bytes`       | Counter | `By`       | `interface_type`, `interface_name`, `direction` | 接口流量字节数（增量） |
-| `zyxel.interface.traffic.packets`     | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | 接口流量包数（增量）   |
-| `zyxel.interface.errors`              | Counter | `{error}`  | `interface_type`, `interface_name`, `direction` | 接口错误数（增量）     |
-| `zyxel.interface.discards`            | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | 接口丢包数（增量）     |
+| 指标名称 | 类型 | 单位 | 属性 | 说明 |
+|----------|------|------|------|------|
+| `zyxel.interface.traffic.bytes` | Counter | `By` | `interface_type`, `interface_name`, `direction` | 接口流量字节数（增量） |
+| `zyxel.interface.traffic.packets` | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | 接口流量包数（增量） |
+| `zyxel.interface.errors` | Counter | `{error}` | `interface_type`, `interface_name`, `direction` | 接口错误数（增量） |
+| `zyxel.interface.discards` | Counter | `{packet}` | `interface_type`, `interface_name`, `direction` | 接口丢包数（增量） |
 
-`interface_type` 取值：`ip`、`ethernet`
-`direction` 取值：`sent`、`received`
+`interface_type` 取值：`ip`、`ethernet` | `direction` 取值：`sent`、`received`
 
 #### LAN 端口
 
-| 指标名称          | 类型  | 单位 | 属性     | 说明                               |
-| ----------------- | ----- | ---- | -------- | ---------------------------------- |
-| `zyxel.lan.port.up` | Gauge | —    | `port_name` | `1` = 链路正常，`0` = 链路断开 |
+| 指标名称 | 类型 | 单位 | 属性 | 说明 |
+|----------|------|------|------|------|
+| `zyxel.lan.port.up` | Gauge | -- | `port_name` | `1` = 链路正常，`0` = 链路断开 |
 
 #### 连通性监控
 
-| 指标名称                                  | 类型      | 单位 | 说明                 |
-| ----------------------------------------- | --------- | ---- | -------------------- |
-| `zyxel.monitor.connectivity.rtt.ms`         | Histogram | `ms`   | 连通性探测往返时延   |
-| `zyxel.monitor.connectivity.failures`       | Counter   | —    | 连通性探测失败次数   |
+| 指标名称 | 类型 | 单位 | 说明 |
+|----------|------|------|------|
+| `zyxel.monitor.connectivity.rtt.ms` | Histogram | `ms` | 连通性探测往返时延 |
+| `zyxel.monitor.connectivity.failures` | Counter | -- | 连通性探测失败次数 |
 
 #### 信号质量监控
 
-| 指标名称                                          | 类型    | 单位 | 属性     | 说明                         |
-| ------------------------------------------------- | ------- | ---- | -------- | ---------------------------- |
-| `zyxel.monitor.signal.degraded`                     | Counter | —    | `reason` | 信号质量劣化检测次数         |
-| `zyxel.monitor.signal.recovery.attempts`            | Counter | —    | —        | 由信号问题触发的恢复尝试次数 |
-| `zyxel.monitor.signal.recovery.successes`           | Counter | —    | —        | 由信号问题触发的恢复成功次数 |
-| `zyxel.monitor.signal.recovery.failures`            | Counter | —    | —        | 由信号问题触发的恢复失败次数 |
+| 指标名称 | 类型 | 单位 | 属性 | 说明 |
+|----------|------|------|------|------|
+| `zyxel.monitor.signal.degraded` | Counter | -- | `reason` | 信号质量劣化检测次数 |
+| `zyxel.monitor.signal.recovery.attempts` | Counter | -- | -- | 由信号问题触发的恢复尝试次数 |
+| `zyxel.monitor.signal.recovery.successes` | Counter | -- | -- | 由信号问题触发的恢复成功次数 |
+| `zyxel.monitor.signal.recovery.failures` | Counter | -- | -- | 由信号问题触发的恢复失败次数 |
 
 `reason` 取值：`missing_5g`、`weak_5g_rsrp`
 
 #### 恢复：重启
 
-| 指标名称                                | 类型    | 单位 | 说明                 |
-| --------------------------------------- | ------- | ---- | -------------------- |
-| `zyxel.monitor.reboot.attempts`           | Counter | —    | 重启恢复尝试次数     |
-| `zyxel.monitor.reboot.successes`          | Counter | —    | 重启命令成功次数     |
+| 指标名称 | 类型 | 单位 | 说明 |
+|----------|------|------|------|
+| `zyxel.monitor.reboot.attempts` | Counter | -- | 重启恢复尝试次数 |
+| `zyxel.monitor.reboot.successes` | Counter | -- | 重启命令成功次数 |
 
 #### 恢复：重载
 
-| 指标名称                                    | 类型      | 单位 | 说明                             |
-| ------------------------------------------- | --------- | ---- | -------------------------------- |
-| `zyxel.monitor.reload.attempts`               | Counter   | —    | 重载恢复尝试次数                 |
-| `zyxel.monitor.reload.successes`              | Counter   | —    | 重载恢复成功次数（监控目标已恢复） |
-| `zyxel.monitor.reload.failures`               | Counter   | —    | 重载恢复失败次数（监控目标未恢复） |
-| `zyxel.monitor.reload.duration.seconds`       | Histogram | `s`    | 重载恢复过程总耗时               |
+| 指标名称 | 类型 | 单位 | 说明 |
+|----------|------|------|------|
+| `zyxel.monitor.reload.attempts` | Counter | -- | 重载恢复尝试次数 |
+| `zyxel.monitor.reload.successes` | Counter | -- | 重载恢复成功次数 |
+| `zyxel.monitor.reload.failures` | Counter | -- | 重载恢复失败次数 |
+| `zyxel.monitor.reload.duration.seconds` | Histogram | `s` | 重载恢复过程总耗时 |
 
-### 隐私保护
+## 技术说明
 
-遥测模块会在导出前主动剥离敏感标识符（IMEI、IMSI、IP 地址、MAC 地址、会话密钥等），不会将其上报到遥测后端。
+- HTTP 模式会获取路由器的 RSA 公钥来加密登录凭据。HTTPS 模式跳过这一步，直接发 JSON。
+- 程序接受路由器的自签名证书，这是为局域网环境刻意保留的行为。
+- `config` crate 处理多路径 TOML 加载，后加载的文件会覆盖前面的。
+- 指标采集失败会记录日志，但不会触发恢复。
 
-## English documentation
+---
 
-See [README.md](README.md).
+*本项目与 Zyxel Group Corporation（台湾合勤集团）及其子公司无关，亦未经其认可或授权。Zyxel 为相关所有者的商标。本项目为独立的第三方作品。*
+
+---
+
+<div align="center">
+  <sub>Built with <a href="https://opencode.ai/">OpenCode</a> &middot; AI 辅助编码</sub>
+  <br>
+  <sub>基于 <a href="LICENSE">MIT 许可证</a> 发布</sub>
+</div>
